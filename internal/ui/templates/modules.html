@@ -1,0 +1,24 @@
+{{define "title"}}Modules - XPFarm{{end}}
+{{template "layout.html" .}}
+{{define "content"}}
+<h1>Modules</h1>
+<div class="card">
+    <p>Status of integrated tools.</p>
+    <table>
+        <thead>
+            <tr><th>Module Name</th><th>Status</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+            {{range .Modules}}
+            <tr>
+                <td style="font-weight: 500;">{{.Name}}</td>
+                <td>
+                    {{if .Installed}}<span class="badge" style="background-color: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">Installed</span>{{else}}<span class="badge" style="background-color: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">Missing</span>{{end}}
+                </td>
+                <td>{{if .Installed}}<span style="color: var(--color-muted);">Ready</span>{{else}}<span style="color: var(--color-primary);">Restart App to Install</span>{{end}}</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{end}}

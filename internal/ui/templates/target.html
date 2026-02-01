@@ -1,0 +1,36 @@
+{{define "title"}}Target Details - XPFarm{{end}}
+{{template "layout.html" .}}
+{{define "content"}}
+<div style="margin-bottom: 20px;">
+    <a href="/assets" style="color: var(--color-muted); text-decoration: none;">&larr; Back to Assets</a>
+</div>
+<h1>Target: {{.Target.Value}}</h1>
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value" style="font-size: 1.2rem;">{{.Target.Type}}</div>
+        <div class="stat-label">Type</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" style="font-size: 1.2rem;">
+            {{if .Target.IsCloudflare}}<span style="color: #fbbf24;">Cloudflare</span>{{else}}<span style="color: #34d399;">Direct</span>{{end}}
+        </div>
+        <div class="stat-label">Network Status</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" style="font-size: 1.2rem;">{{len .Target.Results}}</div>
+        <div class="stat-label">Scan Results</div>
+    </div>
+</div>
+<h2>Scan Results</h2>
+{{range .Target.Results}}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+        <span style="font-weight: 600; color: var(--color-primary); text-transform: uppercase;">{{.ToolName}}</span>
+        <span style="color: var(--color-muted); font-size: 0.85rem;">{{.CreatedAt.Format "Jan 02, 2006 15:04:05"}}</span>
+    </div>
+    <pre style="background: #000; padding: 15px; border-radius: 6px; overflow-x: auto; color: #34d399; font-family: 'Consolas', monospace; font-size: 0.9rem; white-space: pre-wrap;">{{.Output}}</pre>
+</div>
+{{else}}
+<div class="card" style="text-align: center; color: var(--color-muted);">No results found.</div>
+{{end}}
+{{end}}

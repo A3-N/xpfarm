@@ -1,0 +1,112 @@
+{{define "title"}}Settings - XPFarm{{end}}
+{{template "layout.html" .}}
+{{define "content"}}
+<h1>Settings</h1>
+
+<div id="discord-section" class="settings-section">
+    <div class="card">
+        <h2>Discord Integration</h2>
+        <p style="color: var(--color-muted); margin-bottom: 20px;">Configure interactive bot or notifications.</p>
+        <form action="/settings/discord" method="POST"
+            style="display: flex; flex-direction: column; gap: 15px; margin-bottom: 10px;">
+            <div style="display: flex; gap: 20px;">
+                <div style="flex: 1;">
+                    <label
+                        style="display: block; color: var(--color-muted); margin-bottom: 5px; font-size: 0.9rem;">Integration
+                        Mode</label>
+                    <select name="discord_mode"
+                        style="width: 100%; padding: 10px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
+                        <option value="custom">Custom Interactive Bot</option>
+                        <option value="notify">Notification Only (ProjectDiscovery)</option>
+                    </select>
+                </div>
+                <div style="flex: 1;">
+                    <label
+                        style="display: block; color: var(--color-muted); margin-bottom: 5px; font-size: 0.9rem;">Channel
+                        ID</label>
+                    <input type="text" name="discord_channel_id" placeholder="123456789..."
+                        value='{{range .Settings}}{{if eq .Key `DISCORD_CHANNEL_ID`}}{{.Value}}{{end}}{{end}}'
+                        style="width: 100%; padding: 10px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
+                </div>
+            </div>
+            <div>
+                <label style="display: block; color: var(--color-muted); margin-bottom: 5px; font-size: 0.9rem;">Bot
+                    Token /
+                    Webhook URL</label>
+                <input type="password" name="discord_token" placeholder="Bot Token..."
+                    value='{{range .Settings}}{{if eq .Key `DISCORD_TOKEN`}}{{.Value}}{{end}}{{end}}'
+                    style="width: 100%; padding: 10px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
+            </div>
+            <button type="submit" class="btn btn-primary" style="align-self: flex-start;">Save & Restart Bot</button>
+        </form>
+    </div>
+</div>
+
+<div id="env-section" class="settings-section" style="display: none;">
+    <div class="card">
+        <h2>Environment Variables</h2>
+        <p style="color: var(--color-muted); margin-bottom: 20px;">Manage API keys. Applied to the running process.</p>
+        <form action="/settings" method="POST" style="display: flex; gap: 10px; margin-bottom: 30px;">
+            <input type="text" name="key" placeholder="Variable Name" required style="flex: 1;">
+            <input type="text" name="value" placeholder="Value" required style="flex: 2;">
+            <input type="text" name="description" placeholder="Description" style="flex: 2;">
+            <button type="submit" class="btn btn-primary">Save</button>
+        </form>
+        <table>
+            <thead>
+                <tr>
+                    <th>Key</th>
+                    <th>Value</th>
+                    <th>Description</th>
+                    <th style="width: 100px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Settings}}
+                {{if and (ne .Key "DISCORD_TOKEN") (ne .Key "DISCORD_CHANNEL_ID") (ne .Key "DISCORD_MODE")}}
+                <tr>
+                    <td style="font-family: monospace; color: var(--color-primary);">{{.Key}}</td>
+                    <td>••••••••••••</td>
+                    <td>{{.Description}}</td>
+                    <td style="display: flex; gap: 5px;">
+                        <!-- Edit (Populate Form JS) -->
+                        <button
+                            onclick="document.querySelector('input[name=key]').value='{{.Key}}'; document.querySelector('input[name=value]').value=''; document.querySelector('input[name=description]').value='{{.Description}}'; document.querySelector('input[name=value]').focus();"
+                            class="badge"
+                            style="background: none; border: 1px solid var(--color-muted); color: var(--color-muted); cursor: pointer;">Edit</button>
+                        <!-- Delete -->
+                        <form action="/settings/delete" method="POST" onsubmit="return confirm('Delete {{.Key}}?');"
+                            style="margin: 0;">
+                            <input type="hidden" name="key" value="{{.Key}}">
+                            <button type="submit" class="badge"
+                                style="background: none; border: 1px solid #ef4444; color: #ef4444; cursor: pointer;">Del</button>
+                        </form>
+                    </td>
+                </tr>
+                {{end}}
+                {{else}}
+                <tr>
+                    <td colspan="4" style="text-align: center; color: var(--color-muted);">No custom variables.</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    function switchTab() {
+        const params = new URLSearchParams(window.location.search);
+        const tab = params.get('tab') || 'env';
+
+        document.querySelectorAll('.settings-section').forEach(el => el.style.display = 'none');
+
+        if (tab === 'discord') {
+            document.getElementById('discord-section').style.display = 'block';
+        } else {
+            document.getElementById('env-section').style.display = 'block';
+        }
+    }
+    window.onload = switchTab;
+</script>
+{{end}}
