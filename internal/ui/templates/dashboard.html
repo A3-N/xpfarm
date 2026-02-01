@@ -1,0 +1,230 @@
+{{define "title"}}Dashboard - XPFarm{{end}}
+{{template "layout.html" .}}
+{{define "content"}}
+<h1>Dashboard</h1>
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{.Stats.Assets}}</div>
+        <div class="stat-label">Total Assets</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{.Stats.Targets}}</div>
+        <div class="stat-label">Total Targets</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{.Stats.Results}}</div>
+        <div class="stat-label">Total Findings</div>
+    </div>
+</div>
+
+<!-- Charts Section -->
+<div
+    style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px;">
+    <div class="card">
+        <h2>Targets Distribution</h2>
+        <canvas id="assetChart"></canvas>
+    </div>
+    <div class="card">
+        <h2>Findings by Tool</h2>
+        <canvas id="toolChart"></canvas>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Recent Results</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Tool</th>
+                <th>Target</th>
+                <th>Time</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .RecentResults}}
+            <tr>
+                <td style="color: var(--color-primary); font-weight: 500;">{{.ToolName}}</td>
+                <td><a href="/target/{{.TargetID}}" style="color: var(--color-text); text-decoration: none;">Target
+                        #{{.TargetID}}</a></td>
+                <td>{{.CreatedAt.Format "Jan 02 15:04"}}</td>
+                <td><a href="/target/{{.TargetID}}" style="color: var(--color-secondary);">View</a></td>
+            </tr>
+            {{else}}
+            <tr>
+                <td colspan="4" style="text-align: center; color: var(--color-muted);">No recent scans found.</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+
+<!-- Active Scans Panel -->
+<div class="card" style="margin-bottom: 30px; border-left: 4px solid var(--color-primary);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h3 style="margin: 0; display: flex; align-items: center; gap: 10px;">
+            <span class="pulse-dot"></span> Active Scans
+        </h3>
+        <span id="scan-count" class="badge" style="background: var(--bg-hover);">0 Running</span>
+    </div>
+    <div id="active-scans-list" style="display: flex; flex-direction: column; gap: 10px;">
+        <p style="color: var(--color-muted); font-style: italic;">No scans currently running.</p>
+    </div>
+</div>
+
+<style>
+    .pulse-dot {
+        width: 10px;
+        height: 10px;
+        background-color: #10b981;
+        border-radius: 50%;
+        display: inline-block;
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+        animation: pulse-green 2s infinite;
+    }
+
+    @keyframes pulse-green {
+        0% {
+            transform: scale(0.95);
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+        }
+
+        70% {
+            transform: scale(1);
+            box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+        }
+
+        100% {
+            transform: scale(0.95);
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+        }
+    }
+
+    .scan-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+    }
+</style>
+
+<script>
+    function fetchActiveScans() {
+        fetch('/api/scans')
+            .then(response => response.json())
+            .then(data => {
+                const list = document.getElementById('active-scans-list');
+                const countBadge = document.getElementById('scan-count');
+                const scans = data.active_scans || [];
+
+                if (countBadge) countBadge.textContent = scans.length + " Running";
+
+                if (list) {
+                    if (scans.length === 0) {
+                        list.innerHTML = '<p style="color: var(--color-muted); font-style: italic;">No scans currently running.</p>';
+                        return;
+                    }
+
+                    // Only rebuild list if count changes or we did a hard refresh? 
+                    // To prevent jitter, we can just rebuild. It's small.
+                    let html = '';
+                    scans.forEach((scan, index) => {
+                        // Create unique ID for row to remove it easily if needed, though full rebuild handles it.
+                        // We use target as ID safe-ish key.
+                        const safeId = 'scan-row-' + index;
+                        html += `
+                            <div class="scan-item" id="${safeId}">
+                                <div style="font-weight: 500;">
+                                    <span style="color: var(--color-primary);">Scanning:</span> ${scan.target}
+                                    <span style="font-size: 0.8em; color: var(--color-muted); margin-left: 5px;">(${scan.asset})</span>
+                                </div>
+                                <button onclick="stopScan('${scan.target}', '${safeId}')" class="btn exception-btn" style="padding: 4px 10px; font-size: 0.8rem; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid #ef4444;">
+                                    Stop
+                                </button>
+                            </div>`;
+                    });
+                    list.innerHTML = html;
+                }
+            })
+            .catch(err => console.error('Error polling scans:', err));
+    }
+
+    function stopScan(target, rowId) {
+        if (!confirm('Stop scanning ' + target + '?')) return;
+
+        // Optimistic UI: Remove immediately
+        if (rowId) {
+            const row = document.getElementById(rowId);
+            if (row) row.style.display = 'none'; // Hide it instantly
+        }
+
+        fetch('/api/scan/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: target })
+        })
+            .then(res => res.json())
+            .then(data => {
+                // Poll again to confirm state
+                fetchActiveScans();
+            });
+    }
+
+    // Poll every 2 seconds
+    setInterval(fetchActiveScans, 2000);
+    fetchActiveScans(); // Initial call
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // Prepare Data
+    const assetData = {{.ChartData.Assets }}; // Go template injection
+    const toolData = {{.ChartData.Tools }};
+
+    // Asset Chart
+    if (document.getElementById('assetChart')) {
+        new Chart(document.getElementById('assetChart'), {
+            type: 'bar',
+            data: {
+                labels: assetData ? assetData.map(a => a.Name) : [],
+                datasets: [{
+                    label: 'Targets',
+                    data: assetData ? assetData.map(a => a.Count) : [],
+                    backgroundColor: '#8b5cf6',
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, grid: { color: '#1e1e1e' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // Tool Chart
+    if (document.getElementById('toolChart')) {
+        new Chart(document.getElementById('toolChart'), {
+            type: 'doughnut',
+            data: {
+                labels: toolData ? toolData.map(t => t.ToolName) : [],
+                datasets: [{
+                    data: toolData ? toolData.map(t => t.Count) : [],
+                    backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { position: 'right' }
+            }
+        });
+    }
+</script>
+{{end}}

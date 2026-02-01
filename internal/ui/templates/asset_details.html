@@ -1,0 +1,255 @@
+{{define "title"}}Asset Details - XPFarm{{end}}
+{{template "layout.html" .}}
+{{define "content"}}
+<div style="margin-bottom: 20px;">
+    <a href="/assets" style="color: var(--color-muted); text-decoration: none;">&larr; Back to Assets List</a>
+</div>
+
+{{if .ImportReport}}
+<div class="card" style="border: 1px solid var(--color-primary);">
+    <h2>Import Results</h2>
+    <div style="max-height: 200px; overflow-y: auto;">
+        <table style="font-size: 0.9rem;">
+            <thead>
+                <tr>
+                    <th>Target</th>
+                    <th>Status</th>
+                    <th>Detail</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .ImportReport}}
+                <tr>
+                    <td style="font-family: monospace;">{{.Target}}</td>
+                    <td>
+                        {{if eq .Status "success"}}<span style="color: var(--color-secondary);">Added</span>{{end}}
+                        {{if eq .Status "warning"}}<span style="color: #f59e0b;">Skipped</span>{{end}}
+                        {{if eq .Status "error"}}<span style="color: #ef4444;">Failed</span>{{end}}
+                    </td>
+                    <td style="color: var(--color-muted);">{{.Detail}}</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+</div>
+{{end}}
+
+<h1>Asset Group: {{.Asset.Name}}</h1>
+
+<!-- Scan Status Banner -->
+<div id="asset-scan-status"
+    style="display: none; margin-bottom: 20px; padding: 15px; background: rgba(16, 185, 129, 0.1); border: 1px solid #10b981; border-radius: 6px; justify-content: space-between; align-items: center;">
+    <div style="font-weight: bold; color: #10b981; font-size: 1.1em; display: flex; align-items: center; gap: 10px;">
+        <span class="pulse-dot"></span> Scan in Progress
+    </div>
+    <button onclick="stopAssetScan('{{.Asset.Name}}')" class="btn"
+        style="background: #ef4444; color: white; border: none;">Stop All Scans</button>
+</div>
+
+<!-- Manage Asset (Moved Top) -->
+<div class="card">
+    <h2>Manage Asset</h2>
+    <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: start;">
+        <!-- Import Form -->
+        <div style="flex: 2; min-width: 300px;">
+            <h3>Import Targets</h3>
+            <p style="color: var(--color-muted); font-size: 0.9rem; margin-bottom: 10px;">Paste targets (newline
+                separated) or upload .txt/.csv</p>
+            <form action="/asset/{{.Asset.ID}}/import" method="POST" enctype="multipart/form-data"
+                style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; gap: 10px;">
+                    <textarea name="raw_text" rows="3" placeholder="example.com&#10;192.168.1.1"
+                        style="flex: 1; background-color: #050505; border: 1px solid var(--border-color); color: white; padding: 10px; border-radius: 6px; font-family: monospace;"></textarea>
+                    <div style="display: flex; flex-direction: column; gap: 10px; justify-content: space-between;">
+                        <input type="file" name="file" accept=".txt,.csv"
+                            style="color: var(--color-muted); font-size: 0.8rem; width: 200px;">
+                        <button type="submit" class="btn btn-primary" style="width: 100%;">Import</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- Actions -->
+        <div style="flex: 0 0 200px; padding-left: 20px; border-left: 1px solid var(--border-color);">
+            <h3>Actions</h3>
+
+            <!-- Scan All -->
+            <form action="/asset/{{.Asset.ID}}/scan" method="POST" style="margin: 0;">
+                <label
+                    style="display: flex; align-items: center; gap: 5px; font-size: 0.8rem; color: var(--color-muted); margin-bottom: 5px;">
+                    <input type="checkbox" name="exclude_cf" checked> Exclude Cloudflare
+                </label>
+                <button type="submit" class="btn btn-secondary" style="width: 100%;">Scan All Targets</button>
+            </form>
+
+            <form action="/assets/delete" method="POST"
+                onsubmit="return confirm('Are you sure you want to delete this asset group?');"
+                style="margin-top: 20px;">
+                <input type="hidden" name="id" value="{{.Asset.ID}}">
+                <button type="submit" class="btn"
+                    style="background-color: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid #ef4444; width: 100%; transition: all 0.2s;">Delete
+                    Asset Group</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Targets in Group</h2>
+    <table id="targets-table">
+        <thead>
+            <tr>
+                <th>Target</th>
+                <th>Type</th>
+                <th>Cloudflare</th>
+                <th>Last Scanned</th>
+                <th style="width: 100px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Asset.Targets}}
+            <tr id="row-{{.ID}}">
+                <td>
+                    <!-- Display Mode -->
+                    <div class="display-mode" style="display: flex; align-items: center; gap: 10px;">
+                        <a href="/target/{{.ID}}"
+                            style="color: var(--color-primary); text-decoration: none; font-weight: 500;">{{.Value}}</a>
+                    </div>
+                    <!-- Edit Mode (Hidden) -->
+                    <div class="edit-mode" style="display: none; align-items: center; gap: 5px;">
+                        <input type="text" id="input-{{.ID}}" value="{{.Value}}"
+                            style="padding: 5px; width: 200px; background-color: #050505; border: 1px solid var(--border-color); color: white; border-radius: 4px;">
+                        <button onclick="saveEdit('{{.ID}}')" class="badge"
+                            style="background: var(--color-secondary); color: black; border: none; cursor: pointer;">Save</button>
+                        <button onclick="toggleEdit('{{.ID}}', false)" class="badge"
+                            style="background: var(--bg-hover); color: var(--color-muted); border: none; cursor: pointer;">X</button>
+                    </div>
+                </td>
+                <td>{{.Type}}</td>
+                <td>{{if .IsCloudflare}}<span class="badge badge-cf">Yes</span>{{else}}<span
+                        style="color: var(--color-muted);">No</span>{{end}}</td>
+                <td>{{.UpdatedAt.Format "Jan 02, 2006"}}</td>
+                <td style="display: flex; gap: 5px;">
+                    <!-- Edit Button -->
+                    <button onclick="toggleEdit('{{.ID}}', true)" class="badge"
+                        style="background: none; border: 1px solid var(--color-muted); color: var(--color-muted); cursor: pointer;">Edit</button>
+                    <!-- Delete -->
+                    <form action="/target/delete" method="POST" onsubmit="return confirm('Delete {{.Value}}?');"
+                        style="margin: 0;">
+                        <input type="hidden" name="id" value="{{.ID}}">
+                        <button type="submit" class="badge"
+                            style="background: none; border: 1px solid #ef4444; color: #ef4444; cursor: pointer;">Del</button>
+                    </form>
+                </td>
+            </tr>
+            {{else}}
+            <tr>
+                <td colspan="5" style="text-align: center; color: var(--color-muted);">No targets in this group.</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+
+<!-- Hidden Form to submit updates -->
+<form id="update-form" action="/target/update" method="POST" style="display: none;">
+    <input type="hidden" name="id" id="update-id">
+    <input type="hidden" name="value" id="update-val">
+</form>
+
+<script>
+    function toggleEdit(id, show) {
+        const row = document.getElementById('row-' + id);
+        const display = row.querySelector('.display-mode');
+        const edit = row.querySelector('.edit-mode');
+
+        if (show) {
+            display.style.display = 'none';
+            edit.style.display = 'flex';
+            row.querySelector('#input-' + id).focus();
+        } else {
+            display.style.display = 'flex';
+            edit.style.display = 'none';
+        }
+    }
+
+    function saveEdit(id) {
+        const newVal = document.getElementById('input-' + id).value;
+        document.getElementById('update-id').value = id;
+        document.getElementById('update-val').value = newVal;
+        document.getElementById('update-form').submit();
+    }
+
+    // Asset Scan Logic
+    const currentAsset = "{{.Asset.Name}}";
+
+    function checkAssetScanStatus() {
+        console.log("Checking status for asset:", currentAsset);
+        fetch('/api/scans')
+            .then(res => res.json())
+            .then(data => {
+                const scans = data.active_scans || [];
+                // Check if ANY scan matches this asset
+                const isActive = scans.some(s => s.asset === currentAsset);
+
+                const statusPanel = document.getElementById('asset-scan-status');
+                if (statusPanel) {
+                    // Force flex display if active
+                    statusPanel.style.display = isActive ? 'flex' : 'none';
+                }
+            })
+            .catch(console.error);
+    }
+
+    function stopAssetScan(assetName) {
+        if (!confirm("Stop all scans for " + assetName + "?")) return;
+
+        // Optimistic UI
+        document.getElementById('asset-scan-status').style.display = 'none';
+
+        fetch('/api/scan/stop_asset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset: assetName })
+        })
+            .then(res => res.json())
+            .then(() => {
+                setTimeout(checkAssetScanStatus, 500);
+            });
+    }
+
+    // Start Polling
+    setInterval(checkAssetScanStatus, 2000);
+    checkAssetScanStatus();
+</script>
+
+<style>
+    .pulse-dot {
+        width: 10px;
+        height: 10px;
+        background-color: #10b981;
+        border-radius: 50%;
+        display: inline-block;
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+        animation: pulse-green 2s infinite;
+    }
+
+    @keyframes pulse-green {
+        0% {
+            transform: scale(0.95);
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+        }
+
+        70% {
+            transform: scale(1);
+            box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+        }
+
+        100% {
+            transform: scale(0.95);
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+        }
+    }
+</style>
+{{end}}

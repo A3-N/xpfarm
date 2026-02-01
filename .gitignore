@@ -1,6 +1,31 @@
+# Binaries
+xpfarm
+xpfarm.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Test/Temp
+tmp/
+test/
+*.test
+*.out
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
 __pycache__/
 *.py[cod]
-*$py.class
-*.db
-tools/
-bin/
+screenshots/

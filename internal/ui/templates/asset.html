@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Asset: {{.Asset.Name}} - XPFarm</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1,
+        h2 {
+            color: #38bdf8;
+        }
+
+        a {
+            color: #4ade80;
+            text-decoration: none;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background-color: #1e293b;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #334155;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #334155;
+        }
+
+        th {
+            color: #94a3b8;
+        }
+
+        tr:hover {
+            background-color: #334155;
+        }
+
+        .cf-badge {
+            background-color: #f59e0b;
+            color: #000;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            margin-left: 5px;
+        }
+
+        .nav {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/">← Back to Dashboard</a>
+        </div>
+        <h1>Asset: {{.Asset.Name}}</h1>
+        <div class="card">
+            <h2>Targets</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Value</th>
+                        <th>Type</th>
+                        <th>Cloudflare</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Asset.Targets}}
+                    <tr>
+                        <td><a href="/target/{{.ID}}">{{.Value}}</a></td>
+                        <td>{{.Type}}</td>
+                        <td>{{if .IsCloudflare}}<span class="cf-badge">CF Detected</span>{{else}}No{{end}}</td>
+                        <td><a href="/target/{{.ID}}">View Details</a></td>
+                    </tr>
+                    {{else}}
+                    <tr>
+                        <td colspan="4">No targets found.</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+
+</html>
