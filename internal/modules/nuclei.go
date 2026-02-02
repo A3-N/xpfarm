@@ -2,7 +2,6 @@ package modules
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"xpfarm/pkg/utils"
 )
@@ -14,14 +13,15 @@ func (n *Nuclei) Name() string {
 }
 
 func (n *Nuclei) CheckInstalled() bool {
-	_, err := exec.LookPath("nuclei")
+	path := utils.ResolveBinaryPath("nuclei")
+	_, err := exec.LookPath(path)
 	return err == nil
 }
 
 func (n *Nuclei) Install() error {
 	cmd := exec.Command("go", "install", "-v", "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = utils.GetInfoWriter()
+	cmd.Stderr = utils.GetInfoWriter()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install nuclei: %v", err)
 	}
@@ -31,7 +31,8 @@ func (n *Nuclei) Install() error {
 func (n *Nuclei) Run(target string) (string, error) {
 	utils.LogInfo("Running nuclei on %s...", target)
 	// -u target -silent
-	cmd := exec.Command("nuclei", "-u", target, "-silent")
+	path := utils.ResolveBinaryPath("nuclei")
+	cmd := exec.Command(path, "-u", target, "-silent")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("nuclei failed: %v\nOutput: %s", err, output)

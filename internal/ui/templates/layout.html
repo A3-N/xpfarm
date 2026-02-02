@@ -366,6 +366,12 @@
                 </div>
             </details>
 
+            <!-- Overlord (Coming Soon) -->
+            <a href="/overlord" class="nav-link {{if eq .Page `overlord`}}active{{end}}">Overlord</a>
+
+            <!-- Separator -->
+            <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 15px 0;">
+
             <!-- Modules -->
             <a href="/modules" class="nav-link {{if eq .Page `modules`}}active{{end}}">Modules</a>
 
@@ -375,6 +381,7 @@
                 <div class="sub-menu">
                     <a href="/settings?tab=env" class="sub-link">Environment Variables</a>
                     <a href="/settings?tab=discord" class="sub-link">Discord Integration</a>
+                    <a href="/settings?tab=telegram" class="sub-link">Telegram Integration</a>
                 </div>
             </details>
         </div>

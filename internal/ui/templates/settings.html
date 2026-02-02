@@ -24,7 +24,7 @@
                     <label
                         style="display: block; color: var(--color-muted); margin-bottom: 5px; font-size: 0.9rem;">Channel
                         ID</label>
-                    <input type="text" name="discord_channel_id" placeholder="123456789..."
+                    <input type="text" name="discord_channel_id" placeholder="123456789..." autocomplete="off"
                         value='{{range .Settings}}{{if eq .Key `DISCORD_CHANNEL_ID`}}{{.Value}}{{end}}{{end}}'
                         style="width: 100%; padding: 10px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
                 </div>
@@ -33,7 +33,7 @@
                 <label style="display: block; color: var(--color-muted); margin-bottom: 5px; font-size: 0.9rem;">Bot
                     Token /
                     Webhook URL</label>
-                <input type="password" name="discord_token" placeholder="Bot Token..."
+                <input type="password" name="discord_token" placeholder="Bot Token..." autocomplete="off"
                     value='{{range .Settings}}{{if eq .Key `DISCORD_TOKEN`}}{{.Value}}{{end}}{{end}}'
                     style="width: 100%; padding: 10px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
             </div>
@@ -42,15 +42,69 @@
     </div>
 </div>
 
+<div id="telegram-section" class="settings-section" style="display: none;">
+    <div class="card">
+        <h2>Telegram Integration</h2>
+        <p style="color: var(--color-muted); margin-bottom: 20px;">Configure Telegram notifications.</p>
+        <form action="/settings/telegram" method="POST"
+            style="display: flex; flex-direction: column; gap: 15px; margin-bottom: 10px;">
+            <div style="display: flex; gap: 20px;">
+                <div style="flex: 1;">
+                    <label
+                        style="display: block; color: var(--color-muted); margin-bottom: 5px; font-size: 0.9rem;">Chat
+                        ID</label>
+                    <input type="text" name="telegram_chat_id" placeholder="-1001234567890" autocomplete="off"
+                        value='{{range .Settings}}{{if eq .Key `TELEGRAM_CHAT_ID`}}{{.Value}}{{end}}{{end}}'
+                        style="width: 100%; padding: 10px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
+                </div>
+                <div style="flex: 1;">
+                    <!-- Spacer -->
+                </div>
+            </div>
+            <div>
+                <label style="display: block; color: var(--color-muted); margin-bottom: 5px; font-size: 0.9rem;">Bot
+                    Token</label>
+                <input type="password" name="telegram_token" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+                    autocomplete="off"
+                    value='{{range .Settings}}{{if eq .Key `TELEGRAM_TOKEN`}}{{.Value}}{{end}}{{end}}'
+                    style="width: 100%; padding: 10px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
+            </div>
+            <button type="submit" class="btn btn-primary" style="align-self: flex-start;">Save Configuration</button>
+        </form>
+    </div>
+</div>
+
+
+
 <div id="env-section" class="settings-section" style="display: none;">
     <div class="card">
         <h2>Environment Variables</h2>
         <p style="color: var(--color-muted); margin-bottom: 20px;">Manage API keys. Applied to the running process.</p>
-        <form action="/settings" method="POST" style="display: flex; gap: 10px; margin-bottom: 30px;">
-            <input type="text" name="key" placeholder="Variable Name" required style="flex: 1;">
-            <input type="text" name="value" placeholder="Value" required style="flex: 2;">
-            <input type="text" name="description" placeholder="Description" style="flex: 2;">
-            <button type="submit" class="btn btn-primary">Save</button>
+        <form action="/settings" method="POST"
+            style="display: flex; flex-direction: column; gap: 15px; margin-bottom: 10px;">
+            <div style="display: flex; gap: 20px;">
+                <div style="flex: 1;">
+                    <label
+                        style="display: block; color: var(--color-muted); margin-bottom: 5px; font-size: 0.9rem;">Variable
+                        Name</label>
+                    <input type="text" name="key" placeholder="API_KEY" required
+                        style="width: 100%; padding: 10px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
+                </div>
+                <div style="flex: 1;">
+                    <label
+                        style="display: block; color: var(--color-muted); margin-bottom: 5px; font-size: 0.9rem;">Value</label>
+                    <input type="text" name="value" placeholder="secret-value-123" required
+                        style="width: 100%; padding: 10px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
+                </div>
+            </div>
+            <div>
+                <label
+                    style="display: block; color: var(--color-muted); margin-bottom: 5px; font-size: 0.9rem;">Description
+                    (Optional)</label>
+                <input type="text" name="description" placeholder="Description of this variable"
+                    style="width: 100%; padding: 10px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
+            </div>
+            <button type="submit" class="btn btn-primary" style="align-self: flex-start;">Save Variable</button>
         </form>
         <table>
             <thead>
@@ -103,6 +157,8 @@
 
         if (tab === 'discord') {
             document.getElementById('discord-section').style.display = 'block';
+        } else if (tab === 'telegram') {
+            document.getElementById('telegram-section').style.display = 'block';
         } else {
             document.getElementById('env-section').style.display = 'block';
         }

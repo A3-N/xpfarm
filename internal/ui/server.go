@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"xpfarm/internal/database"
 	"xpfarm/internal/modules"
 	"xpfarm/internal/notifications/discord"
+	"xpfarm/internal/notifications/telegram"
 	"xpfarm/pkg/utils"
 
 	"github.com/gin-gonic/gin"
@@ -49,7 +51,7 @@ func StartServer(port string) error {
 		return err
 	}
 
-	pages := []string{"dashboard.html", "assets.html", "asset_details.html", "modules.html", "settings.html", "target.html"}
+	pages := []string{"dashboard.html", "assets.html", "asset_details.html", "modules.html", "settings.html", "target.html", "overlord.html"}
 
 	for _, page := range pages {
 		pageContent, err := f.ReadFile("templates/" + page)
@@ -84,8 +86,8 @@ func StartServer(port string) error {
 
 	r.HTMLRender = render
 
-	// --- Discord Bot Integration ---
 	var discordToken, discordChannel string
+	var telegramToken, telegramChatID string
 	db := database.GetDB()
 	var settings []database.Setting
 	db.Find(&settings)
@@ -96,27 +98,53 @@ func StartServer(port string) error {
 		if s.Key == "DISCORD_CHANNEL_ID" {
 			discordChannel = s.Value
 		}
+		if s.Key == "TELEGRAM_TOKEN" {
+			telegramToken = s.Value
+		}
+		if s.Key == "TELEGRAM_CHAT_ID" {
+			telegramChatID = s.Value
+		}
 	}
 
+	// Notification Clients
+	var discordClient *discord.Client
+	var telegramClient *telegram.Client
+	manager := core.GetManager()
+
+	// Init Discord
 	if discordToken != "" {
-		manager := core.GetManager()
 		dc, err := discord.NewClient(discordToken, discordChannel, manager)
 		if err == nil {
 			if err := dc.Start(); err == nil {
-				// Hook up callbacks
-				manager.OnStart = func(target string) {
-					dc.SendNotification("🚀 Scan Started", "Started scanning target: **"+target+"**", 0x34d399) // Green
-				}
-				manager.OnStop = func(target string, cancelled bool) {
-					// Generic notification for both finished and stopped
-					dc.SendNotification("🏁 Scan Ended", "Scanning finished or stopped for: **"+target+"**", 0x8b5cf6) // Purple
-				}
+				discordClient = dc
 			} else {
-				// log error
 				os.Stderr.WriteString("Failed to start Discord bot: " + err.Error() + "\n")
 			}
 		} else {
 			os.Stderr.WriteString("Failed to create Discord client: " + err.Error() + "\n")
+		}
+	}
+
+	// Init Telegram
+	if telegramToken != "" && telegramChatID != "" {
+		telegramClient = telegram.NewClient(telegramToken, telegramChatID)
+	}
+
+	// Hook up callbacks (Broadcast)
+	manager.OnStart = func(target string) {
+		if discordClient != nil {
+			discordClient.SendNotification("🚀 Scan Started", "Started scanning target: **"+target+"**", 0x34d399)
+		}
+		if telegramClient != nil {
+			telegramClient.SendNotification(fmt.Sprintf("*🚀 Scan Started*\nStarted scanning target: `%s`", target))
+		}
+	}
+	manager.OnStop = func(target string, cancelled bool) {
+		if discordClient != nil {
+			discordClient.SendNotification("🏁 Scan Ended", "Scanning finished or stopped for: **"+target+"**", 0x8b5cf6)
+		}
+		if telegramClient != nil {
+			telegramClient.SendNotification(fmt.Sprintf("*🏁 Scan Ended*\nScanning finished or stopped for: `%s`", target))
 		}
 	}
 
@@ -176,6 +204,13 @@ func StartServer(port string) error {
 				"Tools":  toolStats,
 				"Assets": assetStats,
 			},
+		}))
+	})
+
+	// Overlord
+	r.GET("/overlord", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "overlord.html", getGlobalContext(gin.H{
+			"Page": "overlord",
 		}))
 	})
 
@@ -319,7 +354,8 @@ func StartServer(port string) error {
 
 			// Global Duplicate Check
 			var existing database.Target
-			if err := db.Where("value = ?", tVal).First(&existing).Error; err == nil {
+			// Use Find() with Limit(1) to check existence without triggering "record not found" log
+			if db.Where("value = ?", tVal).Limit(1).Find(&existing).RowsAffected > 0 {
 				// Found existing
 				var existingAsset database.Asset
 				db.First(&existingAsset, existing.AssetID)
@@ -489,6 +525,33 @@ func StartServer(port string) error {
 				}
 			}
 		}
+
+		c.Redirect(http.StatusFound, "/settings")
+	})
+
+	r.POST("/settings/telegram", func(c *gin.Context) {
+		token := c.PostForm("telegram_token")
+		chatID := c.PostForm("telegram_chat_id")
+
+		db := database.GetDB()
+		settings := map[string]string{
+			"TELEGRAM_TOKEN":   token,
+			"TELEGRAM_CHAT_ID": chatID,
+		}
+
+		for k, v := range settings {
+			var s database.Setting
+			db.FirstOrCreate(&s, database.Setting{Key: k})
+			s.Value = v
+			s.Description = "Telegram Configuration"
+			db.Save(&s)
+			os.Setenv(k, v)
+		}
+
+		// Simplified Reload: Note that we aren't stopping/starting listeners dynamically perfectly here
+		// But Telegram is stateless REST, so just creating a client object next time or re-assigning var would work if we had global access.
+		// For now, save requires restart for reliable effect, or we accept that it works on next boot.
+		// We could try to inject it into the closure if we refactored, but preventing complexity.
 
 		c.Redirect(http.StatusFound, "/settings")
 	})

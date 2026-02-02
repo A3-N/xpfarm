@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -9,11 +10,35 @@ import (
 	"xpfarm/internal/modules"
 	"xpfarm/internal/ui"
 	"xpfarm/pkg/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	fmt.Println("XPFarm - Automated Pentest Tool")
-	fmt.Println("-------------------------------")
+	// Parse Flags
+	debugMode := flag.Bool("debug", false, "Enable debug mode")
+	flag.Parse()
+
+	// Configure Gin Mode
+	if *debugMode {
+		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
+	banner := `
+____  ________________________                     
+╲   ╲╱  ╱╲______   ╲_   _____╱____ _______  _____  
+ ╲     ╱  │     ___╱│    __) ╲__  ╲╲_  __ ╲╱     ╲ 
+ ╱     ╲  │    │    │     ╲   ╱ __ ╲│  │ ╲╱  Y Y  ╲
+╱___╱╲  ╲ │____│    ╲___  ╱  (____  ╱__│  │__│_│  ╱
+      ╲_╱               ╲╱        ╲╱            ╲╱ 
+`
+	utils.PrintGradient(banner)
+	fmt.Println("Death to TLS")
+
+	// 0. Environment Setup
+	// utils.EnsureGoBinPath() - REMOVED per user request
 
 	// 1. Initialize Database
 	utils.LogInfo("Initializing Database...")
@@ -29,16 +54,16 @@ func main() {
 
 	for _, mod := range allModules {
 		if !mod.CheckInstalled() {
-			utils.LogWarning("Tool '%s' not found. Attempting install...", mod.Name())
+			utils.LogWarning("Tool %s not found. Attempting install...", utils.Bold(mod.Name()))
 			if err := mod.Install(); err != nil {
-				utils.LogError("Failed to install '%s': %v", mod.Name(), err)
+				utils.LogError("Failed to install %s: %v", utils.Bold(mod.Name()), err)
 				missingCount++
 			} else {
-				utils.LogSuccess("Successfully installed '%s'", mod.Name())
+				utils.LogSuccess("Successfully installed %s", utils.Bold(mod.Name()))
 			}
 		} else {
 			// Optional: Verbose mode could show installed tools
-			// utils.LogSuccess("'%s' is installed.", mod.Name())
+			// utils.LogSuccess("%s is installed.", utils.Bold(mod.Name()))
 		}
 	}
 
@@ -50,12 +75,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	utils.LogSuccess("All dependencies satisfied.")
+	utils.LogSuccess("%s", utils.Bold("All dependencies satisfied."))
 
 	// 4. Start Web Server
 	port := "8888"
-	utils.LogSuccess("Starting Web Interface on port %s...", port)
-	utils.LogSuccess("Access at http://localhost:%s", port)
+	utils.LogSuccess("Starting Web Interface on port %s...", utils.Bold(port))
+	utils.LogSuccess("Access at %s", utils.Bold("http://localhost:"+port))
 
 	// Open browser? Maybe later.
 

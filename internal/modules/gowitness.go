@@ -2,7 +2,6 @@ package modules
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"xpfarm/pkg/utils"
 )
@@ -14,14 +13,15 @@ func (g *Gowitness) Name() string {
 }
 
 func (g *Gowitness) CheckInstalled() bool {
-	_, err := exec.LookPath("gowitness")
+	path := utils.ResolveBinaryPath("gowitness")
+	_, err := exec.LookPath(path)
 	return err == nil
 }
 
 func (g *Gowitness) Install() error {
 	cmd := exec.Command("go", "install", "github.com/sensepost/gowitness@latest")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = utils.GetInfoWriter()
+	cmd.Stderr = utils.GetInfoWriter()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install gowitness: %v", err)
 	}
@@ -31,7 +31,8 @@ func (g *Gowitness) Install() error {
 func (g *Gowitness) Run(target string) (string, error) {
 	utils.LogInfo("Running gowitness on %s...", target)
 	// single scan: single -u target
-	cmd := exec.Command("gowitness", "single", "-u", target)
+	path := utils.ResolveBinaryPath("gowitness")
+	cmd := exec.Command(path, "single", "-u", target)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("gowitness failed: %v\nOutput: %s", err, output)

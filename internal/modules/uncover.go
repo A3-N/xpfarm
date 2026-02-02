@@ -2,7 +2,6 @@ package modules
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"xpfarm/pkg/utils"
 )
@@ -14,14 +13,15 @@ func (u *Uncover) Name() string {
 }
 
 func (u *Uncover) CheckInstalled() bool {
-	_, err := exec.LookPath("uncover")
+	path := utils.ResolveBinaryPath("uncover")
+	_, err := exec.LookPath(path)
 	return err == nil
 }
 
 func (u *Uncover) Install() error {
 	cmd := exec.Command("go", "install", "-v", "github.com/projectdiscovery/uncover/cmd/uncover@latest")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = utils.GetInfoWriter()
+	cmd.Stderr = utils.GetInfoWriter()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install uncover: %v", err)
 	}
@@ -35,7 +35,8 @@ func (u *Uncover) Run(target string) (string, error) {
 	// As a placeholder, we'll run it with -q (query) if target looks like a query, or throw error.
 	// However, the user flow implies "targets" are companies/domains. Uncover uses API keys to search shodan/censys etc.
 	// We'll assume target is a domain and search for it.
-	cmd := exec.Command("uncover", "-q", target, "-silent")
+	path := utils.ResolveBinaryPath("uncover")
+	cmd := exec.Command(path, "-q", target, "-silent")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("uncover failed: %v\nOutput: %s", err, output)
