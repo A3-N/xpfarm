@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -198,6 +199,30 @@ func StartServer(port string) error {
 		db.Model(&database.Asset{}).Count(&assetsCount)
 		db.Model(&database.Target{}).Count(&targetsCount)
 		db.Model(&database.ScanResult{}).Count(&resultsCount)
+
+		var portsCount int64
+		db.Model(&database.Port{}).Count(&portsCount)
+
+		// Tech Stack Count (Unique technologies)
+		var techStacks []string
+		db.Model(&database.WebAsset{}).Pluck("tech_stack", &techStacks)
+		uniqueTech := make(map[string]bool)
+		for _, stack := range techStacks {
+			if stack == "" {
+				continue
+			}
+			techs := strings.Split(stack, ", ")
+			for _, t := range techs {
+				if t != "" {
+					uniqueTech[t] = true
+				}
+			}
+		}
+		techCount := len(uniqueTech)
+
+		// Tools Count (Installed/Available)
+		toolsCount := len(modules.GetAll())
+
 		// Chart Data: Results per Tool
 		type ToolStat struct {
 			ToolName string
@@ -208,16 +233,75 @@ func StartServer(port string) error {
 
 		// Chart Data: Targets per Asset
 		type AssetStat struct {
+			ID    uint
 			Name  string
 			Count int
 		}
 		var assetStats []AssetStat
-		// We have to query this manually or iterate loaded assets
 		var allAssets []database.Asset
 		db.Preload("Targets").Find(&allAssets)
 		for _, a := range allAssets {
-			assetStats = append(assetStats, AssetStat{Name: a.Name, Count: len(a.Targets)})
+			assetStats = append(assetStats, AssetStat{ID: a.ID, Name: a.Name, Count: len(a.Targets)})
 		}
+
+		// Chart: Tech Stack Distribution (Top 10)
+		type LabelCount struct {
+			Label string
+			Count int
+		}
+		techMap := make(map[string]int)
+		for _, stack := range techStacks {
+			if stack == "" {
+				continue
+			}
+			parts := strings.Split(stack, ", ")
+			for _, p := range parts {
+				if p != "" {
+					techMap[p]++
+				}
+			}
+		}
+		var techChart []LabelCount
+		for k, v := range techMap {
+			techChart = append(techChart, LabelCount{Label: k, Count: v})
+		}
+		// Sort by count desc
+		// Sort by count desc
+		sort.Slice(techChart, func(i, j int) bool {
+			return techChart[i].Count > techChart[j].Count
+		})
+		if len(techChart) > 10 {
+			techChart = techChart[:10]
+		}
+
+		// Chart: Web Server Distribution
+		var webServerStats []LabelCount
+		db.Model(&database.WebAsset{}).
+			Select("web_server as label, count(*) as count").
+			Where("web_server != ''").
+			Group("web_server").
+			Order("count desc").
+			Limit(10).
+			Scan(&webServerStats)
+
+		// Chart: Port Distribution (Top 10)
+		var portStats []LabelCount
+		db.Model(&database.Port{}).
+			Select("port as label, count(*) as count").
+			Group("port").
+			Order("count desc").
+			Limit(10).
+			Scan(&portStats)
+
+		// Chart: Top Services
+		var serviceStats []LabelCount
+		db.Model(&database.Port{}).
+			Select("service as label, count(*) as count").
+			Where("service != ''").
+			Group("service").
+			Order("count desc").
+			Limit(10).
+			Scan(&serviceStats)
 
 		c.HTML(http.StatusOK, "dashboard.html", getGlobalContext(gin.H{
 			"Page": "dashboard",
@@ -225,11 +309,18 @@ func StartServer(port string) error {
 				"Assets":  assetsCount,
 				"Targets": targetsCount,
 				"Results": resultsCount,
+				"Ports":   portsCount,
+				"Tech":    techCount,
+				"Tools":   toolsCount,
 			},
 			"RecentResults": recentResults,
 			"ChartData": gin.H{
-				"Tools":  toolStats,
-				"Assets": assetStats,
+				"Tools":      toolStats,
+				"Assets":     assetStats,
+				"Tech":       techChart,
+				"WebServers": webServerStats,
+				"Ports":      portStats,
+				"Services":   serviceStats,
 			},
 		}))
 	})
