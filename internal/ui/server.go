@@ -56,14 +56,18 @@ func StartServer(port string) error {
 	r.GET("/favicon.ico", func(c *gin.Context) {
 		data, err := f.ReadFile("static/favicon.ico")
 		if err != nil {
+			// Try serving from generic static mapping if exists, else 404
 			c.Status(404)
 			return
 		}
-		// Modern browsers handle PNG in ICO extension usually, but let's be technically correct with header?
-		// User said "use favicon.ico", assume contents are acceptable or browser handles it.
-		// Sending image/x-icon or image/png depending on content is better but let's just send what we have.
 		c.Data(200, "image/x-icon", data)
 	})
+
+	// Serve screenshots directory
+	if err := os.MkdirAll("screenshots", 0755); err != nil {
+		utils.LogError("Failed to create screenshots dir: %v", err)
+	}
+	r.Static("/screenshots", "./screenshots")
 
 	// Custom template renderer to handle layout + page isolation
 	render := MultiRender{templates: make(map[string]*template.Template)}
