@@ -467,7 +467,9 @@ func StartServer(port string) error {
 	r.GET("/asset/:id", func(c *gin.Context) {
 		id := c.Param("id")
 		var asset database.Asset
-		if err := database.GetDB().Preload("Targets").First(&asset, id).Error; err != nil {
+		// Use Find to avoid GORM "record not found" error log
+		database.GetDB().Preload("Targets").Find(&asset, id)
+		if asset.ID == 0 {
 			c.Redirect(http.StatusFound, "/assets")
 			return
 		}

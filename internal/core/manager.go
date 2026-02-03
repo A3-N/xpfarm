@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -321,11 +322,13 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 						parts := strings.Split(line, ":")
 						if len(parts) >= 2 {
 							portVal := utils.StringToInt(parts[len(parts)-1])
-							var portObj database.Port
-							db.Where(database.Port{TargetID: targetObj.ID, Port: portVal}).FirstOrCreate(&portObj, database.Port{
+							db.Clauses(clause.OnConflict{
+								Columns:   []clause.Column{{Name: "target_id"}, {Name: "port"}},
+								DoNothing: true,
+							}).Create(&database.Port{
 								TargetID: targetObj.ID,
 								Port:     portVal,
-								Protocol: "tcp", // inference
+								Protocol: "tcp",
 								Service:  "unknown",
 							})
 							count++
@@ -404,8 +407,11 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 						Port int    `json:"port"`
 					}
 					if err := json.Unmarshal([]byte(line), &nResult); err == nil {
-						var portObj database.Port
-						db.Where(database.Port{TargetID: t.ID, Port: nResult.Port}).FirstOrCreate(&portObj, database.Port{
+						// Use OnConflict to handle race condition between Uncover and Naabu
+						db.Clauses(clause.OnConflict{
+							Columns:   []clause.Column{{Name: "target_id"}, {Name: "port"}},
+							DoNothing: true,
+						}).Create(&database.Port{
 							TargetID: t.ID,
 							Port:     nResult.Port,
 							Protocol: "tcp",
@@ -421,11 +427,13 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 				}
 
 				// --- STAGE 3: Nmap Service Enumeration ---
+				var nResults []modules.NmapResult
 				if len(targetPorts) > 0 {
 					nm := modules.Get("nmap")
 					// Type assertion to access CustomScan
 					if nmapMod, ok := nm.(*modules.Nmap); ok && nmapMod.CheckInstalled() {
-						nResults, err := nmapMod.CustomScan(ctx, t.Value, targetPorts)
+						var err error
+						nResults, err = nmapMod.CustomScan(ctx, t.Value, targetPorts)
 						if err != nil {
 							utils.LogError("[Scanner] Nmap failed for %s: %v", t.Value, err)
 						} else {
@@ -440,6 +448,73 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 										"version": res.Version,
 										"scripts": res.Scripts,
 									})
+							}
+						}
+					}
+
+					// --- STAGE 4: Web Probing (Httpx) ---
+					// Filter for HTTP services from Nmap results
+					var httpUrls []string
+					for _, res := range nResults {
+						if strings.Contains(res.Service, "http") ||
+							strings.Contains(res.Service, "ssl") ||
+							res.Port == 80 || res.Port == 443 || res.Port == 8080 || res.Port == 8443 {
+
+							protocol := "http"
+							if strings.Contains(res.Service, "ssl") || strings.Contains(res.Service, "https") || res.Port == 443 || res.Port == 8443 {
+								protocol = "https"
+							}
+							url := fmt.Sprintf("%s://%s:%d", protocol, t.Value, res.Port)
+							httpUrls = append(httpUrls, url)
+						}
+					}
+
+					if len(httpUrls) > 0 {
+						utils.LogInfo("[Scanner] Triggering Httpx Stage 4 for %d URLs on %s", len(httpUrls), t.Value)
+						httpxMod := modules.Get("httpx")
+						if hx, ok := httpxMod.(*modules.Httpx); ok && hx.CheckInstalled() {
+							webResults, err := hx.RunRich(ctx, httpUrls)
+							if err != nil {
+								utils.LogError("[Scanner] Httpx Stage 4 failed: %v", err)
+							} else {
+								// Save WebAssets
+								count := 0
+								for _, w := range webResults {
+									// Skip completely empty results if any
+									if w.URL == "" {
+										continue
+									}
+
+									// Convert tech stack slice to string
+									techStr := strings.Join(w.Tech, ", ")
+
+									db.Clauses(clause.OnConflict{
+										Columns: []clause.Column{{Name: "target_id"}, {Name: "url"}},
+										DoUpdates: clause.AssignmentColumns([]string{
+											"title", "tech_stack", "web_server", "status_code",
+											"content_len", "word_count", "line_count", "content_type",
+											"location", "ip", "cname", "cdn", "response", "updated_at",
+										}),
+									}).Create(&database.WebAsset{
+										TargetID:    t.ID,
+										URL:         w.URL,
+										Title:       w.Title,
+										TechStack:   techStr,
+										WebServer:   w.WebServer,
+										StatusCode:  w.StatusCode,
+										ContentLen:  w.ContentLen,
+										WordCount:   w.WordCount,
+										LineCount:   w.LineCount,
+										ContentType: w.ContentType,
+										Location:    w.Location,
+										IP:          strings.Join(w.A, ", "),
+										CNAME:       strings.Join(w.CNAMEs, ", "),
+										CDN:         w.CDNName,
+										Response:    "",
+									})
+									count++
+								}
+								utils.LogSuccess("[Scanner] [Httpx] Enriched %d web assets on %s", count, t.Value)
 							}
 						}
 					}

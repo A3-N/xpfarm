@@ -49,16 +49,26 @@ type Port struct {
 }
 
 type WebAsset struct {
-	ID         uint           `gorm:"primaryKey" json:"id"`
-	TargetID   uint           `gorm:"index" json:"target_id"`
-	URL        string         `json:"url"`
-	Title      string         `json:"title"`
-	TechStack  string         `json:"tech_stack"`
-	StatusCode int            `json:"status_code"`
-	ContentLen int            `json:"content_length"`
-	Screenshot string         `json:"screenshot_path"`
-	CreatedAt  time.Time      `json:"created_at"`
-	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	TargetID    uint           `gorm:"index:idx_web_id_url,unique" json:"target_id"`
+	URL         string         `json:"url" gorm:"index:idx_web_id_url,unique"`
+	Title       string         `json:"title"`
+	TechStack   string         `json:"tech_stack"`
+	WebServer   string         `json:"web_server"`
+	StatusCode  int            `json:"status_code"`
+	ContentLen  int            `json:"content_length"`
+	WordCount   int            `json:"word_count"`
+	LineCount   int            `json:"line_count"`
+	ContentType string         `json:"content_type"`
+	Location    string         `json:"location"` // Redirect target
+	IP          string         `json:"ip"`
+	CNAME       string         `json:"cname"`
+	CDN         string         `json:"cdn"`
+	Response    string         `json:"response"` // Raw response body/headers if needed
+	Screenshot  string         `json:"screenshot_path"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 type Vulnerability struct {
