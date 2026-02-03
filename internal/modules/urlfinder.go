@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"xpfarm/pkg/utils"
@@ -28,11 +29,11 @@ func (u *Urlfinder) Install() error {
 	return nil
 }
 
-func (u *Urlfinder) Run(target string) (string, error) {
+func (u *Urlfinder) Run(ctx context.Context, target string) (string, error) {
 	utils.LogInfo("Running urlfinder on %s...", target)
 	// -d target -silent -all
 	path := utils.ResolveBinaryPath("urlfinder")
-	cmd := exec.Command(path, "-d", target, "-silent", "-all")
+	cmd := exec.CommandContext(ctx, path, "-d", target, "-silent", "-all")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("urlfinder failed: %v\nOutput: %s", err, output)

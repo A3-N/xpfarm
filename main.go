@@ -18,6 +18,9 @@ func main() {
 	debugMode := flag.Bool("debug", false, "Enable debug mode")
 	flag.Parse()
 
+	// Configure Logging
+	utils.SetDebug(*debugMode)
+
 	// Configure Gin Mode
 	if *debugMode {
 		gin.SetMode(gin.DebugMode)
@@ -81,6 +84,11 @@ ____  ________________________
 	port := "8888"
 	utils.LogSuccess("Starting Web Interface on port %s...", utils.Bold(port))
 	utils.LogSuccess("Access at %s", utils.Bold("http://localhost:"+port))
+
+	// Enable Silent Mode (suppress further Info/Success logs to keep terminal clean for bars)
+	if !*debugMode {
+		utils.SetSilent(true)
+	}
 
 	// Open browser? Maybe later.
 

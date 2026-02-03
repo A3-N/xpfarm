@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"xpfarm/pkg/utils"
@@ -28,11 +29,11 @@ func (k *Katana) Install() error {
 	return nil
 }
 
-func (k *Katana) Run(target string) (string, error) {
+func (k *Katana) Run(ctx context.Context, target string) (string, error) {
 	utils.LogInfo("Running katana on %s...", target)
 	// -u target -silent
 	path := utils.ResolveBinaryPath("katana")
-	cmd := exec.Command(path, "-u", target, "-silent")
+	cmd := exec.CommandContext(ctx, path, "-u", target, "-silent")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("katana failed: %v\nOutput: %s", err, output)

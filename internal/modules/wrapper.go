@@ -1,5 +1,7 @@
 package modules
 
+import "context"
+
 // Module defines the interface that all tool wrappers must implement.
 type Module interface {
 	// Name returns the name of the tool (e.g., "nuclei")
@@ -14,5 +16,5 @@ type Module interface {
 	// Run executes the tool against a specific target.
 	// target can be a domain, URL, or IP.
 	// It returns the raw output or a path to the output file, and an error.
-	Run(target string) (string, error)
+	Run(ctx context.Context, target string) (string, error)
 }

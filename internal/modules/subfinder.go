@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"xpfarm/pkg/utils"
@@ -28,11 +29,11 @@ func (s *Subfinder) Install() error {
 	return nil
 }
 
-func (s *Subfinder) Run(target string) (string, error) {
+func (s *Subfinder) Run(ctx context.Context, target string) (string, error) {
 	utils.LogInfo("Running subfinder on %s...", target)
 	// -d target -silent
 	path := utils.ResolveBinaryPath("subfinder")
-	cmd := exec.Command(path, "-d", target, "-silent")
+	cmd := exec.CommandContext(ctx, path, "-d", target, "-silent")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("subfinder failed: %v\nOutput: %s", err, output)

@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"xpfarm/pkg/utils"
@@ -28,11 +29,11 @@ func (n *Naabu) Install() error {
 	return nil
 }
 
-func (n *Naabu) Run(target string) (string, error) {
+func (n *Naabu) Run(ctx context.Context, target string) (string, error) {
 	utils.LogInfo("Running naabu on %s...", target)
 	// -host target -json -silent -top-ports 100 (fast scan for MVP)
 	path := utils.ResolveBinaryPath("naabu")
-	cmd := exec.Command(path, "-host", target, "-json", "-silent", "-top-ports", "100")
+	cmd := exec.CommandContext(ctx, path, "-host", target, "-json", "-silent", "-top-ports", "100")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("naabu failed: %v\nOutput: %s", err, output)

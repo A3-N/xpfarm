@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"xpfarm/pkg/utils"
@@ -28,11 +29,11 @@ func (g *Gowitness) Install() error {
 	return nil
 }
 
-func (g *Gowitness) Run(target string) (string, error) {
+func (g *Gowitness) Run(ctx context.Context, target string) (string, error) {
 	utils.LogInfo("Running gowitness on %s...", target)
 	// single scan: single -u target
 	path := utils.ResolveBinaryPath("gowitness")
-	cmd := exec.Command(path, "single", "-u", target)
+	cmd := exec.CommandContext(ctx, path, "single", "-u", target)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("gowitness failed: %v\nOutput: %s", err, output)

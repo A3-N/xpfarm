@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"xpfarm/pkg/utils"
@@ -29,12 +30,12 @@ func (c *Cvemap) Install() error {
 	return nil
 }
 
-func (c *Cvemap) Run(target string) (string, error) {
+func (c *Cvemap) Run(ctx context.Context, target string) (string, error) {
 	utils.LogInfo("Running cvemap search for %s...", target)
 	// -q query -silent (e.g., search term)
 	// Binary is vulnx
 	path := utils.ResolveBinaryPath("vulnx")
-	cmd := exec.Command(path, "-q", target, "-silent")
+	cmd := exec.CommandContext(ctx, path, "-q", target, "-silent")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("cvemap failed: %v\nOutput: %s", err, output)

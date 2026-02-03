@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"os"
 	"strings"
 	"sync"
@@ -63,10 +62,10 @@ func (sm *ScanManager) StartScan(targetInput string, assetName string, excludeCF
 	sm.mu.Lock()
 	if _, exists := sm.activeScans[targetInput]; exists {
 		sm.mu.Unlock()
-		log.Printf("[Manager] Scan already running for %s, ignoring start request.", targetInput)
+		utils.LogWarning("[Manager] Scan already running for %s, ignoring start request.", targetInput)
 		return
 	}
-	log.Printf("[Manager] Starting scan for %s (Asset: %s)", targetInput, assetName)
+	utils.LogInfo("[Manager] Starting scan for %s (Asset: %s)", targetInput, assetName)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sm.activeScans[targetInput] = ScanInfo{
@@ -111,7 +110,7 @@ func (sm *ScanManager) StopScan(target string) {
 			if sm.OnStop != nil {
 				sm.OnStop(t, true) // Immediate notification
 			}
-			log.Printf("[Manager] Stopping scan for %s", t)
+			utils.LogInfo("[Manager] Stopping scan for %s", t)
 		}
 	} else {
 		// Stop Specific
@@ -121,7 +120,7 @@ func (sm *ScanManager) StopScan(target string) {
 			if sm.OnStop != nil {
 				sm.OnStop(target, true) // Immediate notification
 			}
-			log.Printf("[Manager] Stopping scan for %s", target)
+			utils.LogInfo("[Manager] Stopping scan for %s", target)
 		}
 	}
 }
@@ -149,7 +148,7 @@ func (sm *ScanManager) StopAssetScan(assetName string) {
 			count++
 		}
 	}
-	log.Printf("[Manager] Stopped %d scans for asset %s", count, assetName)
+	utils.LogInfo("[Manager] Stopped %d scans for asset %s", count, assetName)
 }
 
 // runScanLogic executes the sequential pipeline
@@ -169,7 +168,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 	}
 	var asset database.Asset
 	if err := db.Where(database.Asset{Name: assetName}).FirstOrCreate(&asset).Error; err != nil {
-		log.Printf("[Scanner] Error getting asset: %v", err)
+		utils.LogError("[Scanner] Error getting asset: %v", err)
 	}
 
 	// 3. Pre-Scan Checks (Resolution/CF)
@@ -195,58 +194,103 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		Status:       check.Status,
 	}
 	if err := db.Where(database.Target{Value: parsed.Value, AssetID: asset.ID}).FirstOrCreate(&targetObj).Error; err != nil {
-		log.Printf("Error creating target: %v", err)
+		utils.LogError("Error creating target: %v", err)
 		return // Critical failure
 	} else {
 		db.Model(&targetObj).Update("updated_at", time.Now())
 	}
 
 	// === PIPELINE START ===
+	utils.LogInfo("[Scanner] Starting Pipeline for %s", parsed.Value)
 
-	// STAGE 1: DISCOVERY (Subfinder, Uncover)
-	// Goal: Find subdomains and populate them as child targets.
-	utils.LogInfo("[Scanner] Starting Stage 1: Discovery for %s", parsed.Value)
+	// Initialize Multi-line Progress
+	// pm := utils.StartProgress() REMOVED
+	// defer utils.StopProgress() REMOVED
 
-	// A. Subfinder
+	// Channel for targets to be scanned (Producer -> Consumer)
+	// Buffer slightly to avoid blocking producers on immediate processing
+	targetsChan := make(chan database.Target, 100)
+	var producerWG sync.WaitGroup
+
+	// Tracking for Progress Bars
+	// Removed tracking variables
+
+	// Push the main target to the channel first
+	producerWG.Add(1)
+	go func() {
+		defer producerWG.Done()
+		targetsChan <- targetObj
+	}()
+
+	// --- PRODUCERS (Discovery) ---
+
+	// A. Subfinder Producer
 	subfinderMod := modules.Get("subfinder")
 	if subfinderMod != nil && subfinderMod.CheckInstalled() {
-		// Run Subfinder
-		output, err := subfinderMod.Run(parsed.Value)
-		// Always record raw output
-		recordResult(db, targetObj.ID, "subfinder", output)
+		producerWG.Add(1)
+		go func() {
+			defer producerWG.Done()
+			output, err := subfinderMod.Run(ctx, parsed.Value)
+			recordResult(db, targetObj.ID, "subfinder", output)
 
-		if err == nil && output != "" {
-			// Parse Output (simulated "lines" parsing)
-			lines := strings.Split(output, "\n")
-			count := 0
-			for _, line := range lines {
-				domain := strings.TrimSpace(line)
-				if domain == "" || domain == parsed.Value {
-					continue
-				} // Skip empty or self
+			if err == nil && output != "" {
+				lines := strings.Split(output, "\n")
+				// count := 0 (Unused for now)
+				for _, line := range lines {
+					domain := strings.TrimSpace(line)
+					if domain == "" || domain == parsed.Value {
+						continue
+					}
+					// Check simple context cancellation
+					if ctx.Err() != nil {
+						return
+					}
 
-				// Create Subdomain Target
-				subTarget := database.Target{
-					AssetID:  asset.ID,
-					ParentID: &targetObj.ID, // Link to parent
-					Value:    domain,
-					Type:     "domain", // Subfinder returns domains
-					// We don't know status yet, will be scanned in future stages or recursive loop
-					Status: "discovered",
+					subTarget := database.Target{
+						AssetID:  asset.ID,
+						ParentID: &targetObj.ID,
+						Value:    domain,
+						Type:     "domain",
+						Status:   "discovered",
+					}
+					// DB FirstOrCreate
+					if err := db.Clauses(clause.OnConflict{DoNothing: true}).Where(database.Target{Value: domain, AssetID: asset.ID}).FirstOrCreate(&subTarget).Error; err == nil {
+						// Send to scanner
+						targetsChan <- subTarget
+						// found++ (Removed, user requested no count)
+						// pm.UpdateStatus("Subfinder", fmt.Sprintf("Found %d", found)) (Removed)
+
+						// Update Naabu Total (it might not be started yet, but variable is shared)
+						// atomic add
+						// Actually we can just update the bar if it exists
+						// We'll update the variable, Naabu loop will pick it up or we push update?
+						// Better: atomic add to total.
+						// We need atomic because Subfinder and Uncover run parallel.
+					}
 				}
-				// Use FirstOrCreate to avoid duplicates, with DoNothing clause to suppress unique index errors from race conditions
-				if err := db.Clauses(clause.OnConflict{DoNothing: true}).Where(database.Target{Value: domain, AssetID: asset.ID}).FirstOrCreate(&subTarget).Error; err == nil {
-					count++
-				}
+				// Atomic add to total targets for Naabu
+				// Wait, we need to import sync/atomic or just use mutex.
+				// Let's use a local lock for counters if needed, but for now simple addition.
+				// Actually, to keep it simple without major race on the int:
+				// We can just update the progress bar from here if Naabu is running.
+				// Ideally, we add to a shared counter.
+
+				// Simplify: We just update status text for Subfinder. Naabu's *total* updates when it *receives*?
+				// No, Naabu consumes from channel. Channel length is unknown.
+				// We must track total discovered.
+				// Use atomic for thread safety.
+				// atomic.AddInt32(&totalTargets, int32(found))
+
+				// pm.Remove("Subfinder") REMOVED
+			} else if err != nil {
+				// pm.Remove("Subfinder") REMOVED
+				utils.LogError("[Scanner] Subfinder failed: %v", err)
 			}
-			utils.LogSuccess("[Scanner] Subfinder found %d new subdomains for %s", count, parsed.Value)
-		} else if err != nil {
-			utils.LogError("[Scanner] Subfinder failed: %v", err)
-		}
+		}()
 	}
 
-	// B. Uncover (Sequential)
-	utils.LogInfo("[Scanner] Checking for Uncover configuration...")
+	// B. Uncover Producer
+	// utils.LogInfo checks suppressed, just check keys silently or log once
 	hasUncoverKeys := false
 	uncoverKeys := []string{"SHODAN_API_KEY", "CENSYS_API_ID", "CENSYS_API_SECRET", "FOFA_KEY", "QUAKE_TOKEN", "HUNTER_API_KEY", "CRIMINALIP_API_KEY"}
 	for _, k := range uncoverKeys {
@@ -259,109 +303,112 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 	if hasUncoverKeys {
 		uncoverMod := modules.Get("uncover")
 		if uncoverMod != nil && uncoverMod.CheckInstalled() {
-			utils.LogInfo("[Scanner] Uncover keys found. Running Uncover...")
-			// Uncover typically finds IP:PORT
-			output, err := uncoverMod.Run(parsed.Value)
-			recordResult(db, targetObj.ID, "uncover", output)
+			producerWG.Add(1)
+			go func() {
+				defer producerWG.Done()
+				output, err := uncoverMod.Run(ctx, parsed.Value)
+				recordResult(db, targetObj.ID, "uncover", output)
 
-			if err == nil && output != "" {
-				// Parse Output: Expecting IP:PORT or Host:Port
-				lines := strings.Split(output, "\n")
-				count := 0
-				for _, line := range lines {
-					line = strings.TrimSpace(line)
-					if line == "" {
-						continue
+				if err == nil && output != "" {
+					lines := strings.Split(output, "\n")
+					count := 0
+					for _, line := range lines {
+						line = strings.TrimSpace(line)
+						if line == "" {
+							continue
+						}
+
+						parts := strings.Split(line, ":")
+						if len(parts) >= 2 {
+							portVal := utils.StringToInt(parts[len(parts)-1])
+							var portObj database.Port
+							db.Where(database.Port{TargetID: targetObj.ID, Port: portVal}).FirstOrCreate(&portObj, database.Port{
+								TargetID: targetObj.ID,
+								Port:     portVal,
+								Protocol: "tcp", // inference
+								Service:  "unknown",
+							})
+							count++
+						}
 					}
-
-					// Store as Port? Or as a web asset?
-					// Uncover usually returns "1.2.3.4:80"
-					// Let's assume Port for now.
-					parts := strings.Split(line, ":")
-					if len(parts) >= 2 {
-						// Simple parse
-						// We don't have protocol info easily unless uncover provides it.
-						// We'll store it as a Port record on the Target.
-						// But wait, if target is domain, and output is IP:Port, does it belong to domain target? Yes.
-						portVal := parts[len(parts)-1]
-						// Log it for now to avoid "unused variable" error and debug
-						utils.LogInfo("[Scanner] [Uncover] Found potential service: %s on port %s", line, portVal)
-						// Basic int check skipped for brevity, saving as string might be cleaner but model expects int
-						// TODO: Safely parse int.
-
-						// For now, allow raw output to guide next steps or just save result.
-						// User asked to "dump everything we know... tab on the page"
-						// We already have "Network" tab for Ports.
-						// Let's try to add to Port table if possible.
-					}
-					count++
+					utils.LogSuccess("[Scanner] Uncover found %d results", count)
 				}
-				utils.LogSuccess("[Scanner] Uncover found %d results", count)
-			}
-		} else {
-			utils.LogWarning("[Scanner] Uncover tool not installed/found.")
+				// pm.Remove("Uncover") REMOVED
+			}()
 		}
 	} else {
-		utils.LogWarning("[Scanner] No Uncover API keys configured. Skipping Uncover.")
+		// utils.LogInfo("[Scanner] No Uncover keys, skipping.")
 	}
 
-	utils.LogSuccess("[Scanner] Stage 1 Completed for %s", parsed.Value)
+	// Channel Closer
+	go func() {
+		producerWG.Wait()
+		close(targetsChan)
+	}()
 
-	// STAGE 2: NETWORK SCANNING (Naabu)
-	// Goal: Scan ports for the Main Target AND all Discovered Subdomains.
-	utils.LogInfo("[Scanner] Starting Stage 2: Network Scanning (Naabu)...")
-
-	// Collect targets to scan
-	// 1. Main Target
-	targetsToScan := []database.Target{}
-	// Check if main target is alive or just scan it? Naabu checks liveness.
-	targetsToScan = append(targetsToScan, targetObj)
-
-	// 2. Subdomains (reload to get latest IDs)
-	var freshTarget database.Target
-	if err := db.Preload("Subdomains").First(&freshTarget, targetObj.ID).Error; err == nil {
-		targetsToScan = append(targetsToScan, freshTarget.Subdomains...)
-	}
-
+	// --- CONSUMER (Scanner - Naabu) ---
 	naabuMod := modules.Get("naabu")
+
 	if naabuMod != nil && naabuMod.CheckInstalled() {
-		for _, t := range targetsToScan {
-			// Skip if obviously invalid (though naabu handles it)
-			if t.Value == "" {
+		scannedTargets := make(map[uint]bool) // Key by ID
+
+		for t := range targetsChan {
+			if ctx.Err() != nil {
+				break
+			}
+			if scannedTargets[t.ID] {
 				continue
 			}
+			scannedTargets[t.ID] = true
 
-			utils.LogInfo("[Scanner] [Naabu] Scanning %s...", t.Value)
-			output, err := naabuMod.Run(t.Value)
+			// scannedTargetsCount++ (Removed)
+			// Dynamically update total based on channel buffer + scanned?
+			// This is tricky. Producers add to channel.
+			// Let's just assume Current/Total where Total grows as we find things.
+			// We need a thread-safe way to know "Total Discovered".
+			// Since we didn't implement atomic counters perfectlly above, let's cheat slightly:
+			// Total = scanned + len(targetsChan) approx? No.
+			// Effective fix: Make `totalTargets` an atomic.
+
+			// For this iteration, let's just increment total if current > total (which happens if discovery adds more)
+			// Actually, just rely on what we have.
+			// We will just show "Scanned X" if we can't get strict total.
+			// But user asked for 5/10.
+
+			// Let's implement atomic total properly.
+			// Using channel len is unstable.
+			// We'll update the bar:
+			// pm.UpdateProgress("Naabu", int(scannedTargetsCount), int(totalTargets))
+			// But totalTargets needs to be updated by producers.
+			// Since I can't import sync/atomic easily effectively in this patch without adding imports:
+			// I will just use a heuristic: Total = scanned + len(channel) + 1.
+			// It gives a rough estimate of "Pending work".
+
+			// pm.UpdateProgress("Naabu", int(scannedTargetsCount), currentTotal) REMOVED
+
+			// NOTE: The above updates every target, but the Ticker only redrawing every 1.5s filters the noise. Perfect.
+
+			output, err := naabuMod.Run(ctx, t.Value)
 			recordResult(db, t.ID, "naabu", output)
 
 			if err == nil && output != "" {
-				// Parse JSON Output
-				// Format: {"ip":"...", "host":"...", "port":80, ...}
 				lines := strings.Split(output, "\n")
 				portsFound := 0
-
 				for _, line := range lines {
 					if strings.TrimSpace(line) == "" {
 						continue
 					}
-
 					var nResult struct {
 						IP   string `json:"ip"`
 						Port int    `json:"port"`
-						Host string `json:"host"`
 					}
 					if err := json.Unmarshal([]byte(line), &nResult); err == nil {
-						// Save Port
-						// Protocol/Service are not in basic Naabu JSON?
-						// Naabu usually gives just port.
-						// We can infer protocol (tcp) and service (basic map) or leave empty for now.
-
-						db.Create(&database.Port{
+						var portObj database.Port
+						db.Where(database.Port{TargetID: t.ID, Port: nResult.Port}).FirstOrCreate(&portObj, database.Port{
 							TargetID: t.ID,
 							Port:     nResult.Port,
 							Protocol: "tcp",
-							Service:  "unknown", // Naabu doesn't detect service version by default?
+							Service:  "unknown",
 						})
 						portsFound++
 					}
@@ -372,10 +419,12 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 			}
 		}
 	} else {
-		utils.LogWarning("[Scanner] Naabu tool not installed/found. Skipping Stage 2.")
+		utils.LogWarning("[Scanner] Naabu missing, draining pipeline...")
+		for range targetsChan {
+		}
 	}
 
-	utils.LogSuccess("[Scanner] Stage 2 Completed for %s", parsed.Value)
+	utils.LogSuccess("[Scanner] Pipeline Completed for %s", parsed.Value)
 }
 
 func recordResult(db *gorm.DB, targetID uint, tool, output string) {

@@ -17,7 +17,19 @@ var (
 	blue    = color.New(color.FgHiBlue).SprintFunc() // Lighter blue for better visibility
 	magenta = color.New(color.FgMagenta).SprintFunc()
 	bold    = color.New(color.Bold).SprintFunc()
+
+	// Global flags
+	isDebug  = false
+	isSilent = false
 )
+
+func SetDebug(debug bool) {
+	isDebug = debug
+}
+
+func SetSilent(silent bool) {
+	isSilent = silent
+}
 
 // Bold returns the string in bold
 func Bold(a ...interface{}) string {
@@ -29,29 +41,51 @@ func prefix(c func(a ...interface{}) string) string {
 	return c("[xpf]")
 }
 
-func LogInfo(format string, a ...interface{}) {
+// --- Progress Manager Removed ---
+// Logic removed as per user request. Use standard logging only.
+
+func printLog(prefixFunc func(a ...interface{}) string, format string, a ...interface{}) {
+	// Silence check
+	if isSilent && !isDebug {
+	}
+
 	msg := fmt.Sprintf(format, a...)
-	fmt.Printf("%s %s\n", prefix(Gradient), msg)
+
+	// Standard Print
+	fmt.Printf("%s %s\n", prefix(prefixFunc), msg)
+}
+
+func LogInfo(format string, a ...interface{}) {
+	if isSilent && !isDebug {
+		return
+	}
+	printLog(Gradient, format, a...)
 }
 
 func LogSuccess(format string, a ...interface{}) {
-	msg := fmt.Sprintf(format, a...)
-	fmt.Printf("%s %s\n", prefix(GradientSuccess), msg)
+	if isSilent && !isDebug {
+		return
+	}
+	printLog(GradientSuccess, format, a...)
 }
 
 func LogError(format string, a ...interface{}) {
-	msg := fmt.Sprintf(format, a...)
-	fmt.Printf("%s %s\n", prefix(GradientError), msg)
+	// Always print error
+	printLog(GradientError, format, a...)
 }
 
 func LogWarning(format string, a ...interface{}) {
-	msg := fmt.Sprintf(format, a...)
-	fmt.Printf("%s %s\n", prefix(GradientWarning), msg)
+	if isSilent && !isDebug {
+		return
+	}
+	printLog(GradientWarning, format, a...)
 }
 
 func LogDebug(format string, a ...interface{}) {
-	msg := fmt.Sprintf(format, a...)
-	fmt.Printf("%s %s\n", prefix(GradientDebug), msg)
+	if !isDebug {
+		return
+	} // Debug logs never show unless debug is on
+	printLog(GradientDebug, format, a...)
 }
 
 // PrefixWriter is an io.Writer that prepends a prefix to each line

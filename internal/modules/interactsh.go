@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"xpfarm/pkg/utils"
@@ -28,7 +29,7 @@ func (i *Interactsh) Install() error {
 	return nil
 }
 
-func (i *Interactsh) Run(target string) (string, error) {
+func (i *Interactsh) Run(ctx context.Context, target string) (string, error) {
 	// or we accept that this module might block.
 	// Given the user wants a "tool wrapper", maybe they want to generate an OOB link?
 	// We'll just run it as a check for now, or maybe not implement Run fully if it blocks.

@@ -16,29 +16,29 @@ type Asset struct {
 }
 
 type Target struct {
-	ID           uint           `gorm:"primaryKey" json:"id"`
-	AssetID      uint           `gorm:"index" json:"asset_id"`
-	ParentID     *uint          `gorm:"index" json:"parent_id"` // Pointer allows null for root targets
-	Parent       *Target        `gorm:"foreignKey:ParentID" json:"parent,omitempty"`
-	Subdomains   []Target       `gorm:"foreignKey:ParentID" json:"subdomains,omitempty"`
-	Value        string         `gorm:"uniqueIndex" json:"value"` // IP, Domain, or URL
-	Type         string         `json:"type"`                     // "ip", "domain", "url", "cidr"
-	IsCloudflare bool           `json:"is_cloudflare"`
-	IsAlive      bool           `json:"is_alive" gorm:"default:true"`
-	Status       string         `json:"status"` // "up", "down", "unreachable"
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
-	Results      []ScanResult   `gorm:"foreignKey:TargetID" json:"results"`
-	Ports        []Port         `gorm:"foreignKey:TargetID" json:"ports"`
-	WebAssets    []WebAsset     `gorm:"foreignKey:TargetID" json:"web_assets"`
+	ID           uint            `gorm:"primaryKey" json:"id"`
+	AssetID      uint            `gorm:"index" json:"asset_id"`
+	ParentID     *uint           `gorm:"index" json:"parent_id"` // Pointer allows null for root targets
+	Parent       *Target         `gorm:"foreignKey:ParentID" json:"parent,omitempty"`
+	Subdomains   []Target        `gorm:"foreignKey:ParentID" json:"subdomains,omitempty"`
+	Value        string          `gorm:"uniqueIndex" json:"value"` // IP, Domain, or URL
+	Type         string          `json:"type"`                     // "ip", "domain", "url", "cidr"
+	IsCloudflare bool            `json:"is_cloudflare"`
+	IsAlive      bool            `json:"is_alive" gorm:"default:true"`
+	Status       string          `json:"status"` // "up", "down", "unreachable"
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt  `gorm:"index" json:"-"`
+	Results      []ScanResult    `gorm:"foreignKey:TargetID" json:"results"`
+	Ports        []Port          `gorm:"foreignKey:TargetID" json:"ports"`
+	WebAssets    []WebAsset      `gorm:"foreignKey:TargetID" json:"web_assets"`
 	Vulns        []Vulnerability `gorm:"foreignKey:TargetID" json:"vulnerabilities"`
 }
 
 type Port struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
-	TargetID  uint           `gorm:"index" json:"target_id"`
-	Port      int            `json:"port"`
+	TargetID  uint           `gorm:"index:idx_target_port,unique" json:"target_id"` // Composite unique index
+	Port      int            `json:"port" gorm:"index:idx_target_port,unique"`
 	Protocol  string         `json:"protocol"`
 	Service   string         `json:"service"`
 	Product   string         `json:"product"`

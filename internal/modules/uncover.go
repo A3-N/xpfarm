@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"xpfarm/pkg/utils"
@@ -28,7 +29,7 @@ func (u *Uncover) Install() error {
 	return nil
 }
 
-func (u *Uncover) Run(target string) (string, error) {
+func (u *Uncover) Run(ctx context.Context, target string) (string, error) {
 	utils.LogInfo("Running uncover on %s...", target)
 	// uncover usually needs queries, but for a default run we might just check basic info or skip
 	// For this wrapper, we'll assume target is a query or we might need to adjust logic later.
@@ -36,7 +37,7 @@ func (u *Uncover) Run(target string) (string, error) {
 	// However, the user flow implies "targets" are companies/domains. Uncover uses API keys to search shodan/censys etc.
 	// We'll assume target is a domain and search for it.
 	path := utils.ResolveBinaryPath("uncover")
-	cmd := exec.Command(path, "-q", target, "-silent")
+	cmd := exec.CommandContext(ctx, path, "-q", target, "-silent")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("uncover failed: %v\nOutput: %s", err, output)

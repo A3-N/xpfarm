@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/render"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -28,7 +29,28 @@ import (
 var f embed.FS
 
 func StartServer(port string) error {
-	r := gin.Default()
+	// Check for debug mode code
+	isDebug := false
+	for _, arg := range os.Args {
+		if arg == "-debug" {
+			isDebug = true
+			break
+		}
+	}
+	if os.Getenv("DEBUG") != "" {
+		isDebug = true
+	}
+
+	if !isDebug {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
+	// Use gin.New() to skip Default Logger output
+	r := gin.New()
+	r.Use(gin.Recovery())
+	if isDebug {
+		r.Use(gin.Logger())
+	}
 
 	// Serve embedded favicon
 	r.GET("/favicon.ico", func(c *gin.Context) {
@@ -666,17 +688,9 @@ func StartServer(port string) error {
 		if id != "" {
 			db := database.GetDB()
 			// Cascade delete related data
-			// 1. Delete Subdomains (Recursive? Or just simple parent cascade?)
-			// If we delete a parent, we should delete children or unlink them?
-			// For strict cleanup, let's delete children too if they are just "subdomains".
-			var subIDs []uint
-			db.Model(&database.Target{}).Select("id").Where("parent_id = ?", id).Find(&subIDs)
-			if len(subIDs) > 0 {
-				// Delete sub-children data (simple 1-level depth for now)
-				db.Unscoped().Where("target_id IN ?", subIDs).Delete(&database.ScanResult{})
-				db.Unscoped().Where("target_id IN ?", subIDs).Delete(&database.Port{})
-				db.Unscoped().Delete(&database.Target{}, subIDs)
-			}
+			// 1. Unlink Subdomains (Set ParentID to nil)
+			// Instead of deleting subdomains, we just unlink them so they become top-level targets (or just orphaned from this parent)
+			db.Model(&database.Target{}).Where("parent_id = ?", id).Update("parent_id", nil)
 
 			// 2. Delete this target's data
 			db.Unscoped().Where("target_id = ?", id).Delete(&database.ScanResult{})
@@ -703,7 +717,9 @@ func StartServer(port string) error {
 		if err := database.GetDB().
 			Preload("Results").
 			Preload("Subdomains").
-			Preload("Ports").
+			Preload("Ports", func(db *gorm.DB) *gorm.DB {
+				return db.Order("port ASC")
+			}).
 			Preload("WebAssets").
 			Preload("Vulns").
 			First(&target, id).Error; err != nil {
