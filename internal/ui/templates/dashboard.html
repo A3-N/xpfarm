@@ -12,21 +12,62 @@
         <div class="stat-label">Total Targets</div>
     </div>
     <div class="stat-card">
-        <div class="stat-value">{{.Stats.Results}}</div>
-        <div class="stat-label">Total Findings</div>
+        <div class="stat-value">{{.Stats.Ports}}</div>
+        <div class="stat-label">Open Ports</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{.Stats.Tech}}</div>
+        <div class="stat-label">Tech Stacks</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{.Stats.Tools}}</div>
+        <div class="stat-label">Tools</div>
+    </div>
+</div>
+
+<!-- Assets Overview -->
+<div class="card">
+    <h2>Assets Overview</h2>
+    <div style="max-height: 200px; overflow-y: auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Asset Name</th>
+                    <th>Targets Count</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .ChartData.Assets}}
+                <tr>
+                    <td style="font-weight: 500;">{{.Name}}</td>
+                    <td>{{.Count}}</td>
+                    <td><a href="/asset/{{.ID}}" style="color: var(--color-secondary);">View</a></td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
     </div>
 </div>
 
 <!-- Charts Section -->
 <div
-    style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px;">
+    style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 30px;">
     <div class="card">
-        <h2>Targets Distribution</h2>
-        <canvas id="assetChart"></canvas>
+        <h2>Top Technologies</h2>
+        <canvas id="techChart"></canvas>
     </div>
     <div class="card">
-        <h2>Findings by Tool</h2>
-        <canvas id="toolChart"></canvas>
+        <h2>Web Server Distribution</h2>
+        <canvas id="webServerChart"></canvas>
+    </div>
+    <div class="card">
+        <h2>Top Open Ports</h2>
+        <canvas id="portChart"></canvas>
+    </div>
+    <div class="card">
+        <h2>Top Services</h2>
+        <canvas id="serviceChart"></canvas>
     </div>
 </div>
 
@@ -181,48 +222,108 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     // Prepare Data
-    const assetData = {{.ChartData.Assets }}; // Go template injection
-    const toolData = {{.ChartData.Tools }};
+    const techData = {{.ChartData.Tech }};
+    const webServerData = {{.ChartData.WebServers }};
+    const portData = {{.ChartData.Ports }};
+    const serviceData = {{.ChartData.Services }};
 
-    // Asset Chart
-    if (document.getElementById('assetChart')) {
-        new Chart(document.getElementById('assetChart'), {
-            type: 'bar',
+    const commonOptions = {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            y: { beginAtZero: true, grid: { color: '#1e1e1e' } },
+            x: { grid: { display: false } }
+        }
+    };
+
+    // 1. Tech Chart (Bar)
+    if (document.getElementById('techChart')) {
+        new Chart(document.getElementById('techChart'), {
+            type: 'bar', // Horizontal bar? indexAxis: 'y'
             data: {
-                labels: assetData ? assetData.map(a => a.Name) : [],
+                labels: techData ? techData.map(d => d.Label) : [],
                 datasets: [{
-                    label: 'Targets',
-                    data: assetData ? assetData.map(a => a.Count) : [],
+                    label: 'Count',
+                    data: techData ? techData.map(d => d.Count) : [],
                     backgroundColor: '#8b5cf6',
                     borderRadius: 4
                 }]
             },
             options: {
-                responsive: true,
-                plugins: { legend: { display: false } },
+                ...commonOptions,
+                indexAxis: 'y',
                 scales: {
-                    y: { beginAtZero: true, grid: { color: '#1e1e1e' } },
-                    x: { grid: { display: false } }
+                    x: { grid: { display: false } },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: '#1e1e1e' },
+                        ticks: { autoSkip: false } // ensure all labels shown
+                    }
                 }
             }
         });
     }
 
-    // Tool Chart
-    if (document.getElementById('toolChart')) {
-        new Chart(document.getElementById('toolChart'), {
+    // 2. Web Server Chart (Doughnut)
+    if (document.getElementById('webServerChart')) {
+        new Chart(document.getElementById('webServerChart'), {
             type: 'doughnut',
             data: {
-                labels: toolData ? toolData.map(t => t.ToolName) : [],
+                labels: webServerData ? webServerData.map(d => d.Label) : [],
                 datasets: [{
-                    data: toolData ? toolData.map(t => t.Count) : [],
-                    backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'],
+                    data: webServerData ? webServerData.map(d => d.Count) : [],
+                    backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1'],
                     borderWidth: 0
                 }]
             },
             options: {
                 responsive: true,
                 plugins: { position: 'right' }
+            }
+        });
+    }
+
+    // 3. Ports Chart (Bar)
+    if (document.getElementById('portChart')) {
+        new Chart(document.getElementById('portChart'), {
+            type: 'bar',
+            data: {
+                labels: portData ? portData.map(d => d.Label.toString()) : [],
+                datasets: [{
+                    label: 'Frequency',
+                    data: portData ? portData.map(d => d.Count) : [],
+                    backgroundColor: '#f59e0b',
+                    borderRadius: 4
+                }]
+            },
+            options: commonOptions
+        });
+    }
+
+    // 4. Services Chart (Bar - replaces Status)
+    if (document.getElementById('serviceChart')) {
+        new Chart(document.getElementById('serviceChart'), {
+            type: 'bar',
+            data: {
+                labels: serviceData ? serviceData.map(d => d.Label) : [],
+                datasets: [{
+                    label: 'Count',
+                    data: serviceData ? serviceData.map(d => d.Count) : [],
+                    backgroundColor: '#10b981',
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                ...commonOptions,
+                indexAxis: 'y',
+                scales: {
+                    x: { grid: { display: false } },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: '#1e1e1e' },
+                        ticks: { autoSkip: false }
+                    }
+                }
             }
         });
     }
