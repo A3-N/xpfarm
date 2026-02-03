@@ -514,7 +514,37 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 									})
 									count++
 								}
+
 								utils.LogSuccess("[Scanner] [Httpx] Enriched %d web assets on %s", count, t.Value)
+
+								// --- STAGE 5: Visual Inspection (Gowitness) ---
+								// Trigger screenshots for newly added/found web assets
+								gw := modules.Get("gowitness")
+								if gowitness, ok := gw.(*modules.Gowitness); ok && gowitness.CheckInstalled() {
+									utils.LogInfo("[Scanner] Triggering Gowitness Stage 5 for %d URLs on %s", count, t.Value)
+									for _, w := range webResults {
+										if w.URL == "" {
+											continue
+										}
+
+										shotPath, err := gowitness.RunSingle(ctx, w.URL)
+										if err != nil {
+											// Suppress error as some ports might not have a web server or screenshot fails
+											utils.LogDebug("[Scanner] Gowitness failed for %s: %v", w.URL, err)
+										} else {
+											// Check if file actually exists before saving path
+											if _, err := os.Stat(shotPath); err == nil {
+												// Save screenshot path to DB
+												// Upsert again or just update specific field
+												db.Model(&database.WebAsset{}).
+													Where("target_id = ? AND url = ?", t.ID, w.URL).
+													Update("screenshot", shotPath)
+											} else {
+												utils.LogWarning("[Scanner] Gowitness reported success but file not found at %s", shotPath)
+											}
+										}
+									}
+								}
 							}
 						}
 					}

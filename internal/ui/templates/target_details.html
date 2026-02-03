@@ -172,7 +172,9 @@
                     </td>
                     <td>
                         {{if .Screenshot}}
-                        <a href="{{.Screenshot}}" target="_blank">View</a>
+                        <img src="/{{.Screenshot}}" alt="Screenshot"
+                            style="width: 50px; height: 35px; object-fit: cover; cursor: pointer; border: 1px solid var(--border-color); border-radius: 4px;"
+                            onclick="showImage('/{{.Screenshot}}')">
                         {{else}}
                         -
                         {{end}}
@@ -336,22 +338,25 @@
     }
 </style>
 
+<!-- Image Modal -->
+<div id="imgModal" onclick="closeImage()"
+    style="display:none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.9); align-items: center; justify-content: center;">
+    <img id="modalContent"
+        style="margin: auto; display: block; max-width: 90%; max-height: 90vh; border: 2px solid white; border-radius: 4px;">
+</div>
+
 <script>
     function showTab(evt, tabName) {
-        // Hide all tab content
+        // ... existing showTab ...
         var i, tabcontent, tablinks;
         tabcontent = document.getElementsByClassName("tab-content");
         for (i = 0; i < tabcontent.length; i++) {
             tabcontent[i].style.display = "none";
         }
-
-        // Deactivate all buttons
         tablinks = document.getElementsByClassName("tab-btn");
         for (i = 0; i < tablinks.length; i++) {
             tablinks[i].className = tablinks[i].className.replace(" active", "");
         }
-
-        // Show current tab and activate button
         document.getElementById(tabName).style.display = "block";
         evt.currentTarget.className += " active";
     }
@@ -363,6 +368,18 @@
         } else {
             x.style.display = "none";
         }
+    }
+
+    function showImage(src) {
+        var modal = document.getElementById("imgModal");
+        var modalImg = document.getElementById("modalContent");
+        modal.style.display = "flex";
+        modalImg.src = src;
+    }
+
+    function closeImage() {
+        var modal = document.getElementById("imgModal");
+        modal.style.display = "none";
     }
 </script>
 {{end}}
