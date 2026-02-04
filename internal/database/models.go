@@ -66,6 +66,7 @@ type WebAsset struct {
 	CDN         string         `json:"cdn"`
 	Response    string         `json:"response"` // Raw response body/headers if needed
 	Screenshot  string         `json:"screenshot_path"`
+	KatanaOutput string        `json:"katana_output"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`

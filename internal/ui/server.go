@@ -819,7 +819,11 @@ func StartServer(port string) error {
 			}).
 			Preload("WebAssets").
 			Preload("Vulns").
-			First(&target, id).Error; err != nil {
+			Find(&target, id).Error; err != nil {
+			c.String(http.StatusInternalServerError, "Database error")
+			return
+		}
+		if target.ID == 0 {
 			c.String(http.StatusNotFound, "Target not found")
 			return
 		}
