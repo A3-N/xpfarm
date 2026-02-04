@@ -80,7 +80,10 @@ ____  ________________________
 
 	utils.LogSuccess("%s", utils.Bold("All dependencies satisfied."))
 
-	// 4. Start Web Server
+	// 4. Check for Updates
+	modules.RunUpdates()
+
+	// 5. Start Web Server
 	port := "8888"
 	utils.LogSuccess("Starting Web Interface on port %s...", utils.Bold(port))
 	utils.LogSuccess("Access at %s", utils.Bold("http://localhost:"+port))

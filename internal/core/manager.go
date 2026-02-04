@@ -248,12 +248,26 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 						return
 					}
 
+					// Validate & Check Cloudflare
+					check := ResolveAndCheck(domain)
+					if !check.IsAlive {
+						// Skip unreachable subdomains
+						continue
+					}
+
+					if excludeCF && check.IsCloudflare {
+						// Skip Cloudflare subdomains if requested
+						continue
+					}
+
 					subTarget := database.Target{
-						AssetID:  asset.ID,
-						ParentID: &targetObj.ID,
-						Value:    domain,
-						Type:     "domain",
-						Status:   "discovered",
+						AssetID:      asset.ID,
+						ParentID:     &targetObj.ID,
+						Value:        domain,
+						Type:         "domain",
+						Status:       check.Status,
+						IsCloudflare: check.IsCloudflare,
+						IsAlive:      check.IsAlive,
 					}
 					// DB FirstOrCreate
 					if err := db.Clauses(clause.OnConflict{DoNothing: true}).Where(database.Target{Value: domain, AssetID: asset.ID}).FirstOrCreate(&subTarget).Error; err == nil {
