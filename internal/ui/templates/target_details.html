@@ -205,6 +205,174 @@
                             <div><strong style="color: var(--color-muted);">Words/Lines:</strong> {{.WordCount}} /
                                 {{.LineCount}}</div>
                         </div>
+
+                        {{if .KatanaOutput}}
+                        <div style="padding: 0 15px 15px 15px;">
+                            <strong style="display:block; margin-bottom: 5px; color: var(--color-muted);">Discovered
+                                Paths:</strong>
+                            <div id="katana-tree-{{.ID}}"
+                                style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; max-height: 600px; overflow-y: auto;">
+                            </div>
+                            <script id="katana-raw-data-{{.ID}}"
+                                type="application/json">{{ json .KatanaOutput }}</script>
+                            <script>
+                                (function () {
+                                    try {
+                                        var treeContainer = document.getElementById('katana-tree-{{.ID}}');
+                                        var rawElement = document.getElementById('katana-raw-data-{{.ID}}');
+                                        if (!rawElement || !treeContainer) return;
+
+                                        var rawContent = rawElement.textContent;
+                                        var paths = [];
+
+                                        // 1. Attempt JSON parsing
+                                        try {
+                                            paths = JSON.parse(rawContent);
+                                        } catch (e) {
+                                            paths = rawContent;
+                                        }
+
+                                        // 2. Resolve nested strings or newline-separated content
+                                        if (typeof paths === 'string') {
+                                            var trimmed = paths.trim();
+                                            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+                                                try {
+                                                    paths = JSON.parse(trimmed);
+                                                } catch (e) {
+                                                    // Fallback to regex split for mixed content
+                                                    paths = trimmed.split(/\r?\n/);
+                                                }
+                                            } else {
+                                                paths = trimmed.split(/\r?\n/);
+                                            }
+                                        }
+
+                                        // 3. Normalize to Non-Empty Array
+                                        if (Array.isArray(paths)) {
+                                            paths = paths.filter(function (p) { return p && typeof p === 'string' && p.trim() !== ""; });
+                                        } else {
+                                            // Should not happen if logic above is correct, but safety net
+                                            paths = [];
+                                        }
+
+                                        if (paths.length === 0) {
+                                            treeContainer.innerHTML = '<span class="text-muted">No paths found.</span>';
+                                            return;
+                                        }
+
+                                        // 4. Build Tree Structure
+                                        var tree = {};
+                                        paths.forEach(function (path) {
+                                            // Handle URL vs Path: remove protocol/domain if present to reduce noise?
+                                            // User requested "Discovered Paths".
+                                            // If path is full URL, we split by /
+                                            // https://example.com/foo -> ["https:", "", "example.com", "foo"]
+                                            // Filter empty -> ["https:", "example.com", "foo"]
+                                            var parts = path.split('/').filter(p => p !== "");
+                                            var current = tree;
+                                            parts.forEach(function (part) {
+                                                if (!current[part]) {
+                                                    current[part] = {};
+                                                }
+                                                current = current[part];
+                                            });
+                                        });
+
+                                        // 5. Render Tree Logic
+                                        function renderNode(node, name, parentPath) {
+                                            var keys = Object.keys(node).sort();
+                                            var isLeaf = keys.length === 0;
+                                            var currentPath = parentPath ? parentPath + "/" + name : name;
+                                            var container = document.createElement('div');
+                                            container.style.marginLeft = "20px";
+                                            container.style.lineHeight = "1.5";
+                                            var label = document.createElement('div');
+                                            label.style.fontFamily = "monospace";
+
+                                            // Copy handling logic
+                                            label.onclick = function (e) {
+                                                e.stopPropagation();
+                                                // If leaf or node, allow copy?
+                                                // If node has children, toggle visibility instead?
+                                                // Let's implement BOTH: Click name to toggle, Icon to copy? 
+                                                // Or just keep it simple.
+                                                // User asked "Click to copy full path" previously.
+                                                // And collapse/expand.
+
+                                                if (!isLeaf) {
+                                                    // Toggle children
+                                                    var childDiv = container.querySelector('.children-container');
+                                                    if (childDiv) {
+                                                        childDiv.style.display = childDiv.style.display === "none" ? "block" : "none";
+                                                    }
+                                                } else {
+                                                    // Copy leaf path
+                                                    // Reconstruct full path approximately
+                                                    // Note: this reconstruction might be partial if inputs were paths not URLs
+                                                    navigator.clipboard.writeText(currentPath).then(function () {
+                                                        var originalText = label.textContent;
+                                                        label.textContent = name + " (Copied!)";
+                                                        setTimeout(function () { label.textContent = name; }, 1000);
+                                                    });
+                                                }
+                                            };
+
+                                            if (isLeaf) {
+                                                label.style.color = "#9ca3af";
+                                                label.style.cursor = "pointer";
+                                                label.title = "Click to copy";
+                                                label.textContent = name;
+                                            } else {
+                                                label.style.color = "#e5e7eb";
+                                                label.style.cursor = "pointer";
+                                                label.textContent = name + "/";
+                                            }
+
+                                            container.appendChild(label);
+
+                                            if (!isLeaf) {
+                                                var childrenContainer = document.createElement('div');
+                                                childrenContainer.className = 'children-container';
+                                                childrenContainer.style.display = "block"; // Changed to BLOCK (Expanded) by default
+
+                                                keys.forEach(function (key) {
+                                                    childrenContainer.appendChild(renderNode(node[key], key, currentPath));
+                                                });
+                                                container.appendChild(childrenContainer);
+                                            }
+                                            return container;
+                                        }
+
+                                        // 6. Append to Container
+                                        treeContainer.innerHTML = ""; // Clear existing
+                                        var rootKeys = Object.keys(tree).sort();
+
+                                        if (rootKeys.length === 0) {
+                                            // Fallback if tree build failed but paths > 0 (e.g. all empty parts?)
+                                            // Should have been caught by filter, but just in case
+                                            treeContainer.innerHTML = '<span class="text-muted">No paths found.</span>';
+                                        } else {
+                                            rootKeys.forEach(function (key) {
+                                                treeContainer.appendChild(renderNode(tree[key], key, ""));
+                                            });
+                                            // Handle special root path case if just "/"
+                                            if (rootKeys.length === 0 && paths.some(p => p === "/")) {
+                                                var div = document.createElement('div');
+                                                div.textContent = "/";
+                                                div.style.marginLeft = "20px";
+                                                div.style.color = "#9ca3af";
+                                                treeContainer.appendChild(div);
+                                            }
+                                        }
+                                    } catch (err) {
+                                        console.error("Katana Tree Error:", err);
+                                        var tc = document.getElementById('katana-tree-{{.ID}}');
+                                        if (tc) tc.innerHTML = '<div style="color:red; font-size:0.8rem;">Error rendering paths: ' + err.message + '</div>';
+                                    }
+                                })();
+                            </script>
+                        </div>
+                        {{end}}
                     </td>
                 </tr>
                 {{else}}

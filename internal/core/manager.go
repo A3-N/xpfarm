@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -582,6 +583,86 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 											} else {
 												utils.LogWarning("[Scanner] Gowitness reported success but file not found at %s", shotPath)
 											}
+										}
+									}
+								}
+
+								// --- STAGE 6: Katana Execution ---
+								kat := modules.Get("katana")
+								// Check type assertion and install
+								if katanaMod, ok := kat.(*modules.Katana); ok && katanaMod.CheckInstalled() {
+									utils.LogInfo("[Scanner] Triggering Katana Stage 6 for %d URLs on %s", count, t.Value)
+									for _, w := range webResults {
+										if w.URL == "" {
+											continue
+										}
+
+										// katana -u https://adriaanbosch.com/hax0r -jc -kf all -fx -d 5 -pc
+										args := []string{"-jc", "-kf", "all", "-fx", "-d", "5", "-pc"}
+										output, err := katanaMod.RunCustom(ctx, w.URL, args)
+
+										// Always Record Raw Result
+										recordResult(db, t.ID, "katana", output)
+
+										if err != nil {
+											utils.LogDebug("[Scanner] Katana failed for %s: %v", w.URL, err)
+										} else {
+											// Process Output for WebAsset
+											// Extract unique paths only
+											uniquePaths := make(map[string]bool)
+											var pathsList []string
+
+											lines := strings.Split(output, "\n")
+											for _, line := range lines {
+												line = strings.TrimSpace(line)
+												if line == "" {
+													continue
+												}
+												// Naive URL parsing to get path
+												// If line is full URL: https://example.com/foo/bar -> /foo/bar
+												// formatting: check if it starts with w.URL or just has scheme
+												if strings.HasPrefix(line, "http") {
+													// Split by scheme://domain
+													parts := strings.SplitN(line, "://", 2)
+													if len(parts) == 2 {
+														// parts[1] is domain/path
+														pathParts := strings.SplitN(parts[1], "/", 2)
+														if len(pathParts) == 2 {
+															pathVal := "/" + pathParts[1]
+															if !uniquePaths[pathVal] {
+																uniquePaths[pathVal] = true
+																pathsList = append(pathsList, pathVal)
+															}
+														} else {
+															// Root path
+															if !uniquePaths["/"] {
+																uniquePaths["/"] = true
+																pathsList = append(pathsList, "/")
+															}
+														}
+													}
+												} else {
+													// Assume relative path if not http? Or ignore.
+													// Katana usually outputs full URLs.
+													// Just in case, add as is if unique
+													if !uniquePaths[line] {
+														uniquePaths[line] = true
+														pathsList = append(pathsList, line)
+													}
+												}
+											}
+
+											// Sort paths
+											sort.Strings(pathsList)
+
+											// Convert to JSON
+											jsonBytes, _ := json.Marshal(pathsList)
+											jsonOutput := string(jsonBytes)
+
+											// Save Katana Output (JSON Paths) to DB
+											db.Model(&database.WebAsset{}).
+												Where("target_id = ? AND url = ?", t.ID, w.URL).
+												Update("katana_output", jsonOutput)
 										}
 									}
 								}
