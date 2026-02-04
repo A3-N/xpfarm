@@ -587,8 +587,10 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 									}
 								}
 
-								// --- STAGE 6: Katana Execution ---
+								// --- STAGE 6: Katana & URLFinder Execution ---
 								kat := modules.Get("katana")
+								urlF := modules.Get("urlfinder")
+
 								// Check type assertion and install
 								if katanaMod, ok := kat.(*modules.Katana); ok && katanaMod.CheckInstalled() {
 									utils.LogInfo("[Scanner] Triggering Katana Stage 6 for %d URLs on %s", count, t.Value)
@@ -597,35 +599,23 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 											continue
 										}
 
-										// katana -u https://adriaanbosch.com/hax0r -jc -kf all -fx -d 5 -pc
-										args := []string{"-jc", "-kf", "all", "-fx", "-d", "5", "-pc"}
-										output, err := katanaMod.RunCustom(ctx, w.URL, args)
+										// Collect all unique paths from both tools
+										uniquePaths := make(map[string]bool)
+										var pathsList []string
 
-										// Always Record Raw Result
-										recordResult(db, t.ID, "katana", output)
-
-										if err != nil {
-											utils.LogDebug("[Scanner] Katana failed for %s: %v", w.URL, err)
-										} else {
-											// Process Output for WebAsset
-											// Extract unique paths only
-											uniquePaths := make(map[string]bool)
-											var pathsList []string
-
-											lines := strings.Split(output, "\n")
+										// Helper to process line-based output
+										processOutput := func(rawOutput string) {
+											lines := strings.Split(rawOutput, "\n")
 											for _, line := range lines {
 												line = strings.TrimSpace(line)
 												if line == "" {
 													continue
 												}
-												// Naive URL parsing to get path
-												// If line is full URL: https://example.com/foo/bar -> /foo/bar
-												// formatting: check if it starts with w.URL or just has scheme
+
+												// Naive URL parsing
 												if strings.HasPrefix(line, "http") {
-													// Split by scheme://domain
 													parts := strings.SplitN(line, "://", 2)
 													if len(parts) == 2 {
-														// parts[1] is domain/path
 														pathParts := strings.SplitN(parts[1], "/", 2)
 														if len(pathParts) == 2 {
 															pathVal := "/" + pathParts[1]
@@ -634,7 +624,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 																pathsList = append(pathsList, pathVal)
 															}
 														} else {
-															// Root path
+															// Root
 															if !uniquePaths["/"] {
 																uniquePaths["/"] = true
 																pathsList = append(pathsList, "/")
@@ -642,28 +632,75 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 														}
 													}
 												} else {
-													// Assume relative path if not http? Or ignore.
-													// Katana usually outputs full URLs.
-													// Just in case, add as is if unique
+													// Relative path or other
 													if !uniquePaths[line] {
 														uniquePaths[line] = true
 														pathsList = append(pathsList, line)
 													}
 												}
 											}
-
-											// Sort paths
-											sort.Strings(pathsList)
-
-											// Convert to JSON
-											jsonBytes, _ := json.Marshal(pathsList)
-											jsonOutput := string(jsonBytes)
-
-											// Save Katana Output (JSON Paths) to DB
-											db.Model(&database.WebAsset{}).
-												Where("target_id = ? AND url = ?", t.ID, w.URL).
-												Update("katana_output", jsonOutput)
 										}
+
+										// 1. Run Katana
+										// katana -u https://adriaanbosch.com/hax0r -jc -kf all -fx -d 5 -pc
+										args := []string{"-jc", "-kf", "all", "-fx", "-d", "5", "-pc"}
+										katanaOutput, err := katanaMod.RunCustom(ctx, w.URL, args)
+										recordResult(db, t.ID, "katana", katanaOutput)
+
+										if err != nil {
+											utils.LogDebug("[Scanner] Katana failed for %s: %v", w.URL, err)
+										} else {
+											processOutput(katanaOutput)
+										}
+
+										// 2. Run URLFinder
+										if urlMod, ok := urlF.(*modules.Urlfinder); ok && urlMod.CheckInstalled() {
+											// Extract hostname for -d flag
+											// w.URL is like https://example.com/foo
+											// We need 'example.com' or whatever hostname Httpx found
+											// Use simple string manipulation or parse
+											var hostname string
+											if strings.Contains(w.URL, "://") {
+												parts := strings.Split(w.URL, "://")
+												if len(parts) > 1 {
+													subParts := strings.Split(parts[1], "/")
+													hostname = subParts[0]
+													// Remove port if exists? urlfinder might want domain only?
+													// "adriaanbosch.com:443" -> "adriaanbosch.com"
+													if strings.Contains(hostname, ":") {
+														hParts := strings.Split(hostname, ":")
+														hostname = hParts[0]
+													}
+												}
+											}
+
+											if hostname != "" {
+												// Run urlfinder -d hostname -all -silent
+												utils.LogInfo("[Scanner] Running URLFinder on %s...", hostname)
+												urlOutput, err := urlMod.Run(ctx, hostname)
+												recordResult(db, t.ID, "urlfinder", urlOutput)
+
+												if err != nil {
+													utils.LogDebug("[Scanner] URLFinder failed for %s: %v", hostname, err)
+												} else {
+													processOutput(urlOutput)
+												}
+											}
+										}
+
+										// Sort paths
+										sort.Strings(pathsList)
+
+										// Convert to JSON
+										jsonBytes, _ := json.Marshal(pathsList)
+										jsonOutput := string(jsonBytes)
+
+										// Save Combined Output (JSON Paths) to DB
+										// We overwrite 'katana_output' field to effectively merge visual result
+										db.Model(&database.WebAsset{}).
+											Where("target_id = ? AND url = ?", t.ID, w.URL).
+											Update("katana_output", jsonOutput)
+
 									}
 								}
 							}
