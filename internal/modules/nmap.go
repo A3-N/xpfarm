@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -69,9 +70,9 @@ type NmapResult struct {
 }
 
 // CustomScan runs the Aggressive Scan -> Fallback Scan logic
-func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int) ([]NmapResult, error) {
+func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int) ([]NmapResult, string, error) {
 	if len(ports) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	portStrs := make([]string, len(ports))
@@ -83,15 +84,34 @@ func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int) ([]Nm
 	utils.LogInfo("Running nmap service scan on %s (Ports: %s)...", target, portList)
 	path := utils.ResolveBinaryPath("nmap")
 
-	// 1. Aggressive Scan
-	args := []string{"-Pn", "-sV", "-sC", "-p", portList, "-oX", "-", target}
-	cmd := exec.CommandContext(ctx, path, args...)
-	output, err := cmd.Output()
+	// Create Temp File for XML
+	xmlFile, err := os.CreateTemp("", "nmap-*.xml")
 	if err != nil {
-		return nil, fmt.Errorf("nmap scan failed: %v", err)
+		return nil, "", fmt.Errorf("failed to create temp xml file: %v", err)
+	}
+	xmlPath := xmlFile.Name()
+	xmlFile.Close()
+	defer os.Remove(xmlPath)
+
+	// 1. Aggressive Scan
+	// Output XML to file, Normal output to stdout (captured)
+	args := []string{"-Pn", "-sV", "-sC", "-p", portList, "-oX", xmlPath, target}
+
+	cmd := exec.CommandContext(ctx, path, args...)
+	outputBytes, err := cmd.CombinedOutput() // This captures normal output now
+	rawOutput := string(outputBytes)
+
+	if err != nil {
+		return nil, rawOutput, fmt.Errorf("nmap scan failed: %v", err)
 	}
 
-	results, fallbackPorts := n.parseNmapXML(output)
+	// Parse XML from file
+	xmlData, err := os.ReadFile(xmlPath)
+	if err != nil {
+		return nil, rawOutput, fmt.Errorf("failed to read nmap xml: %v", err)
+	}
+
+	results, fallbackPorts := n.parseNmapXML(xmlData)
 
 	// 2. Fallback Scan
 	if len(fallbackPorts) > 0 {
@@ -103,11 +123,24 @@ func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int) ([]Nm
 		fbList := strings.Join(fbPortStrs, ",")
 
 		// Simple scan (-Pn only)
-		fbArgs := []string{"-Pn", "-p", fbList, "-oX", "-", target}
+		// Again, separate XML to file? Or just reuse/overwrite? Overwrite is fine or new file.
+		// For fallback, we might not need "Raw Log" as much, but let's append it to rawOutput.
+
+		fbXmlFile, _ := os.CreateTemp("", "nmap-fb-*.xml")
+		fbXmlPath := fbXmlFile.Name()
+		fbXmlFile.Close()
+		defer os.Remove(fbXmlPath)
+
+		fbArgs := []string{"-Pn", "-p", fbList, "-oX", fbXmlPath, target}
 		fbCmd := exec.CommandContext(ctx, path, fbArgs...)
-		fbOutput, fbErr := fbCmd.Output()
+		fbOutBytes, fbErr := fbCmd.CombinedOutput()
+
+		rawOutput += "\n\n--- Fallback Scan ---\n" + string(fbOutBytes)
+
 		if fbErr == nil {
-			fbResults, _ := n.parseNmapXML(fbOutput)
+			fbXmlData, _ := os.ReadFile(fbXmlPath)
+			fbResults, _ := n.parseNmapXML(fbXmlData)
+
 			// Merge fallback results
 			resultMap := make(map[int]*NmapResult)
 			for i := range results {
@@ -116,17 +149,9 @@ func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int) ([]Nm
 
 			for _, fb := range fbResults {
 				if original, ok := resultMap[fb.Port]; ok {
-					// Update service name, keep scripts/original data if needed?
-					// User logic: "use the default service name"
 					original.Service = fb.Service
-					// Clear product/version if they were misleading? Probably yes.
 					original.Product = ""
 					original.Version = ""
-					// Scripts? Tcpwrapped implies connection closed, so scripts likely failed or are useless.
-					// But user said: "if ... tcpwrapped ... or fingerprints ... redo"
-					// We might keep the fingerprint in the script output for debugging if interesting,
-					// but usually we want to clean it up.
-					// Let's keep original scripts if they exist (unless it's just the fingerprint one).
 				}
 			}
 		} else {
@@ -134,7 +159,7 @@ func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int) ([]Nm
 		}
 	}
 
-	return results, nil
+	return results, rawOutput, nil
 }
 
 func (n *Nmap) parseNmapXML(xmlData []byte) ([]NmapResult, []int) {

@@ -14,7 +14,6 @@ func (c *Cvemap) Name() string {
 }
 
 func (c *Cvemap) CheckInstalled() bool {
-	// The binary installed by cvemap/cmd/vulnx is 'vulnx'
 	path := utils.ResolveBinaryPath("vulnx")
 	_, err := exec.LookPath(path)
 	return err == nil
@@ -31,14 +30,20 @@ func (c *Cvemap) Install() error {
 }
 
 func (c *Cvemap) Run(ctx context.Context, target string) (string, error) {
-	utils.LogInfo("Running cvemap search for %s...", target)
-	// -q query -silent (e.g., search term)
-	// Binary is vulnx
+	// Basic run: search for the target string?
+	return c.Search(ctx, target)
+}
+
+// Search runs cvemap with a custom query and returns raw JSON output
+func (c *Cvemap) Search(ctx context.Context, query string) (string, error) {
+	// vulnx -q "query" -json -silent
 	path := utils.ResolveBinaryPath("vulnx")
-	cmd := exec.CommandContext(ctx, path, "-q", target, "-silent")
+	utils.LogInfo("Querying cvemap (vulnx): %s", query)
+
+	cmd := exec.CommandContext(ctx, path, "-q", query, "-json", "-silent")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("cvemap failed: %v\nOutput: %s", err, output)
+		return "", fmt.Errorf("cvemap query failed: %v", err)
 	}
 	return string(output), nil
 }

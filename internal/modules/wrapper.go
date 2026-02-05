@@ -52,4 +52,10 @@ func checkToolUpdate(toolName string) {
 	cmd := exec.Command(path, "-up")
 	// We don't care about output unless debugging, as user wants silence.
 	_, _ = cmd.CombinedOutput()
+
+	// Special Case for Nuclei: Update Templates
+	if toolName == "nuclei" {
+		cmdTmpl := exec.Command(path, "-ut")
+		_, _ = cmdTmpl.CombinedOutput()
+	}
 }

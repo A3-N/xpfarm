@@ -448,7 +448,14 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 					// Type assertion to access CustomScan
 					if nmapMod, ok := nm.(*modules.Nmap); ok && nmapMod.CheckInstalled() {
 						var err error
-						nResults, err = nmapMod.CustomScan(ctx, t.Value, targetPorts)
+						var nmapRaw string
+						nResults, nmapRaw, err = nmapMod.CustomScan(ctx, t.Value, targetPorts)
+
+						// Record Raw Nmap Output
+						if nmapRaw != "" {
+							recordResult(db, t.ID, "nmap", nmapRaw)
+						}
+
 						if err != nil {
 							utils.LogError("[Scanner] Nmap failed for %s: %v", t.Value, err)
 						} else {
@@ -538,6 +545,12 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 												existing[t] = true
 											}
 										}
+
+										// Record Wappalyzer "Raw" Log (Synthesized)
+										if len(w.Tech) > 0 {
+											wappLog := fmt.Sprintf("Target: %s\nDetected Technologies:\n%s", w.URL, strings.Join(w.Tech, ", "))
+											recordResult(db, t.ID, "wappalyzer", wappLog)
+										}
 									}
 
 									// Convert tech stack slice to string
@@ -582,7 +595,16 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 											continue
 										}
 
-										shotPath, err := gowitness.RunSingle(ctx, w.URL)
+										shotPath, gwOut, err := gowitness.RunSingle(ctx, w.URL)
+
+										// Record Raw Gowitness CLI Output
+										if gwOut != "" {
+											// Deduplicate? Or just append? Tools recordResult usually stores separate entries or appends?
+											// recordResult creates a new entry for each call.
+											// Users usually want to see the sequence.
+											recordResult(db, t.ID, "gowitness", gwOut)
+										}
+
 										if err != nil {
 											// Suppress error as some ports might not have a web server or screenshot fails
 											utils.LogDebug("[Scanner] Gowitness failed for %s: %v", w.URL, err)
@@ -730,6 +752,180 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 	}
 
 	utils.LogSuccess("[Scanner] Pipeline Completed for %s", parsed.Value)
+
+	// --- STAGE 7: Smart Vulnerability Scan ---
+	sm.runSmartScan(ctx, db, targetObj)
+}
+
+func (sm *ScanManager) runSmartScan(ctx context.Context, db *gorm.DB, targetObj database.Target) {
+	utils.LogInfo("[Scanner] Starting Stage 7: Smart Vulnerability Scan for %s", targetObj.Value)
+
+	// 1. Gather Context & URLs
+	techSet := make(map[string]bool)
+	versionMap := make(map[string]string) // Product -> Version
+	var targetURLs []string
+
+	// A. From WebAssets
+	var webAssets []database.WebAsset
+	db.Where("target_id = ?", targetObj.ID).Find(&webAssets)
+	for _, wa := range webAssets {
+		if wa.URL != "" {
+			targetURLs = append(targetURLs, wa.URL)
+		}
+		if wa.TechStack != "" {
+			parts := strings.Split(wa.TechStack, ", ")
+			for _, p := range parts {
+				if p != "" {
+					techSet[strings.ToLower(strings.TrimSpace(p))] = true
+				}
+			}
+		}
+	}
+
+	// B. From Ports (Nmap)
+	var ports []database.Port
+	db.Where("target_id = ?", targetObj.ID).Find(&ports)
+	for _, p := range ports {
+		if p.Product != "" {
+			prod := strings.ToLower(strings.TrimSpace(p.Product))
+			techSet[prod] = true
+			if p.Version != "" {
+				versionMap[prod] = strings.TrimSpace(p.Version)
+			}
+		}
+	}
+
+	if len(techSet) == 0 {
+		utils.LogInfo("[Scanner] No technologies detected for Smart Scan on %s", targetObj.Value)
+		return
+	}
+
+	// 2. Prepare Target List File
+	// Nuclei works best with a list of URLs to scan specific endpoints/ports found
+	var targetFile string
+	if len(targetURLs) > 0 {
+		f, err := os.CreateTemp("", "nuclei_targets_*.txt")
+		if err == nil {
+			defer os.Remove(f.Name())
+			for _, u := range targetURLs {
+				f.WriteString(u + "\n")
+			}
+			f.Close()
+			targetFile = f.Name()
+		}
+	}
+	// Fallback to domain if no URLs or file error
+	if targetFile == "" {
+		targetFile = targetObj.Value // Treat as single target args
+	}
+
+	// 3. Prepare Tags
+	var tags []string
+	for t := range techSet {
+		// Simple sanitization: replace spaces with -, keep alphanumeric
+		// e.g. "Apache HTTP Server" -> "apache-http-server"
+		// This is a heuristic.
+		safe := strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				return r
+			}
+			return '-'
+		}, t)
+		// Clean multiple dashes
+		// For MVP just use it.
+		if safe != "" {
+			tags = append(tags, safe)
+		}
+	}
+
+	// 4. Advanced: Get CVEs for Versions
+	var cveIDs []string
+	cveMapMod := modules.Get("cvemap")
+	if cm, ok := cveMapMod.(*modules.Cvemap); ok && cm.CheckInstalled() && len(versionMap) > 0 {
+		utils.LogInfo("[Scanner] Querying Cvemap for %d detected products...", len(versionMap))
+		for prod, ver := range versionMap {
+			// clean prod name for query?
+			// cvemap query: product:"apache" version:"2.4.49"
+			query := fmt.Sprintf("product:\"%s\" version:\"%s\"", prod, ver)
+			jsonOut, err := cm.Search(ctx, query)
+			if err == nil {
+				// Parse JSON output
+				// Output is stream of JSON objects
+				lines := strings.Split(jsonOut, "\n")
+				type CveStub struct {
+					CveID string `json:"cve_id"`
+				}
+				for _, line := range lines {
+					if strings.TrimSpace(line) == "" {
+						continue
+					}
+					var stub CveStub
+					if json.Unmarshal([]byte(line), &stub) == nil && stub.CveID != "" {
+						cveIDs = append(cveIDs, stub.CveID)
+					}
+				}
+			}
+		}
+	}
+
+	// 5. Run Nuclei Passes
+	nucleiMod := modules.Get("nuclei")
+	nm, ok := nucleiMod.(*modules.Nuclei)
+	if !ok || !nm.CheckInstalled() {
+		utils.LogWarning("[Scanner] Nuclei not available for Smart Scan.")
+		return
+	}
+
+	// Pass A: Tags
+	if len(tags) > 0 {
+		// Limit tags to avoid too huge command?
+		tagStr := strings.Join(tags, ",")
+		utils.LogInfo("[Scanner] Running Smart Nuclei Tags: %s", tagStr)
+
+		args := []string{"-silent", "-tags", tagStr, "-severity", "critical,high"}
+		if strings.Contains(targetFile, "nuclei_targets") {
+			args = append(args, "-l", targetFile)
+		} else {
+			args = append(args, "-u", targetFile)
+		}
+
+		out, err := nm.RunRaw(ctx, args)
+		recordResult(db, targetObj.ID, "nuclei-smart-tags", out)
+		if err != nil {
+			utils.LogDebug("Nuclei tags scan error/found: %v", err)
+		}
+	}
+
+	// Pass B: Specific CVEs
+	if len(cveIDs) > 0 {
+		// Deduplicate
+		uniqueIDs := make(map[string]bool)
+		var cleanIDs []string
+		for _, id := range cveIDs {
+			if !uniqueIDs[id] {
+				uniqueIDs[id] = true
+				cleanIDs = append(cleanIDs, id)
+			}
+		}
+
+		if len(cleanIDs) > 0 {
+			idStr := strings.Join(cleanIDs, ",")
+			utils.LogInfo("[Scanner] Running Smart Nuclei CVEs: %d identified", len(cleanIDs))
+
+			args := []string{"-silent", "-id", idStr}
+			if strings.Contains(targetFile, "nuclei_targets") {
+				args = append(args, "-l", targetFile)
+			} else {
+				args = append(args, "-u", targetFile)
+			}
+
+			out, err := nm.RunRaw(ctx, args)
+			recordResult(db, targetObj.ID, "nuclei-smart-cves", out)
+			if err != nil {
+				utils.LogDebug("Nuclei CVE scan error/found: %v", err)
+			}
+		}
+	}
 }
 
 func recordResult(db *gorm.DB, targetID uint, tool, output string) {

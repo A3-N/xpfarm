@@ -30,13 +30,25 @@ func (n *Nuclei) Install() error {
 }
 
 func (n *Nuclei) Run(ctx context.Context, target string) (string, error) {
-	utils.LogInfo("Running nuclei on %s...", target)
-	// -u target -silent
+	// Default run
+	return n.RunCustom(ctx, target, []string{})
+}
+
+func (n *Nuclei) RunCustom(ctx context.Context, target string, customArgs []string) (string, error) {
+	args := []string{"-u", target, "-silent"}
+	args = append(args, customArgs...)
+	return n.RunRaw(ctx, args)
+}
+
+// RunRaw executes nuclei with exact arguments provided
+func (n *Nuclei) RunRaw(ctx context.Context, args []string) (string, error) {
+	utils.LogInfo("Running nuclei with args: %v", args)
 	path := utils.ResolveBinaryPath("nuclei")
-	cmd := exec.CommandContext(ctx, path, "-u", target, "-silent")
+
+	cmd := exec.CommandContext(ctx, path, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("nuclei failed: %v\nOutput: %s", err, output)
+		return string(output), fmt.Errorf("nuclei failed: %v", err)
 	}
 	return string(output), nil
 }
