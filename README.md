@@ -1,5 +1,11 @@
 # XPFarm
 
+## Installation
+
+```bash
+go install github.com/a3-n/xpfarm@latest
+```
+
 ## Build
 
 ```bash
