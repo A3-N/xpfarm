@@ -21,11 +21,11 @@ jobs:
       - name: Verify Dependencies
         run: go mod verify
 
+      - name: Install Linter (Source)
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
       - name: Run Linter
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m
+        run: golangci-lint run --timeout=5m
 
       - name: Run Tests
         # Ensure we don't fail if no tests exist, but 'go test ./...' is standard
