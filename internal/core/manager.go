@@ -362,387 +362,344 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		close(targetsChan)
 	}()
 
-	// --- CONSUMER (Scanner - Naabu) ---
+	// --- CONSUMER (Worker Pool) ---
+	const maxWorkers = 5
 	naabuMod := modules.Get("naabu")
 
 	if naabuMod != nil && naabuMod.CheckInstalled() {
-		scannedTargets := make(map[uint]bool) // Key by ID
+		var scannedTargets sync.Map
+		var workerWG sync.WaitGroup
 
-		for t := range targetsChan {
-			if ctx.Err() != nil {
-				break
-			}
-			if scannedTargets[t.ID] {
-				continue
-			}
-			scannedTargets[t.ID] = true
-
-			// scannedTargetsCount++ (Removed)
-			// Dynamically update total based on channel buffer + scanned?
-			// This is tricky. Producers add to channel.
-			// Let's just assume Current/Total where Total grows as we find things.
-			// We need a thread-safe way to know "Total Discovered".
-			// Since we didn't implement atomic counters perfectlly above, let's cheat slightly:
-			// Total = scanned + len(targetsChan) approx? No.
-			// Effective fix: Make `totalTargets` an atomic.
-
-			// For this iteration, let's just increment total if current > total (which happens if discovery adds more)
-			// Actually, just rely on what we have.
-			// We will just show "Scanned X" if we can't get strict total.
-			// But user asked for 5/10.
-
-			// Let's implement atomic total properly.
-			// Using channel len is unstable.
-			// We'll update the bar:
-			// pm.UpdateProgress("Naabu", int(scannedTargetsCount), int(totalTargets))
-			// But totalTargets needs to be updated by producers.
-			// Since I can't import sync/atomic easily effectively in this patch without adding imports:
-			// I will just use a heuristic: Total = scanned + len(channel) + 1.
-			// It gives a rough estimate of "Pending work".
-
-			// pm.UpdateProgress("Naabu", int(scannedTargetsCount), currentTotal) REMOVED
-
-			// NOTE: The above updates every target, but the Ticker only redrawing every 1.5s filters the noise. Perfect.
-
-			output, err := naabuMod.Run(ctx, t.Value)
-			recordResult(db, t.ID, "naabu", output)
-
-			if err == nil && output != "" {
-				lines := strings.Split(output, "\n")
-				portsFound := 0
-				var targetPorts []int
-				for _, line := range lines {
-					if strings.TrimSpace(line) == "" {
+		for i := 0; i < maxWorkers; i++ {
+			workerWG.Add(1)
+			go func() {
+				defer workerWG.Done()
+				for t := range targetsChan {
+					if ctx.Err() != nil {
+						return
+					}
+					if _, loaded := scannedTargets.LoadOrStore(t.ID, true); loaded {
 						continue
 					}
-					var nResult struct {
-						IP   string `json:"ip"`
-						Port int    `json:"port"`
-					}
-					if err := json.Unmarshal([]byte(line), &nResult); err == nil {
-						// Use OnConflict to handle race condition between Uncover and Naabu
-						db.Clauses(clause.OnConflict{
-							Columns:   []clause.Column{{Name: "target_id"}, {Name: "port"}},
-							DoNothing: true,
-						}).Create(&database.Port{
-							TargetID: t.ID,
-							Port:     nResult.Port,
-							Protocol: "tcp",
-							Service:  "unknown",
-						})
-						portsFound++
-						// Collect for Stage 3
-						targetPorts = append(targetPorts, nResult.Port)
-					}
-				}
-				if portsFound > 0 {
-					utils.LogSuccess("[Scanner] [Naabu] Found %d open ports on %s", portsFound, t.Value)
-				}
 
-				// --- STAGE 3: Nmap Service Enumeration ---
-				var nResults []modules.NmapResult
-				if len(targetPorts) > 0 {
-					nm := modules.Get("nmap")
-					// Type assertion to access CustomScan
-					if nmapMod, ok := nm.(*modules.Nmap); ok && nmapMod.CheckInstalled() {
-						var err error
-						var nmapRaw string
-						nResults, nmapRaw, err = nmapMod.CustomScan(ctx, t.Value, targetPorts)
+					output, err := naabuMod.Run(ctx, t.Value)
+					recordResult(db, t.ID, "naabu", output)
 
-						// Record Raw Nmap Output
-						if nmapRaw != "" {
-							recordResult(db, t.ID, "nmap", nmapRaw)
+					if err == nil && output != "" {
+						lines := strings.Split(output, "\n")
+						portsFound := 0
+						var targetPorts []int
+						seenNaabuPorts := make(map[int]bool)
+						for _, line := range lines {
+							if strings.TrimSpace(line) == "" {
+								continue
+							}
+							var nResult struct {
+								IP   string `json:"ip"`
+								Port int    `json:"port"`
+							}
+							if err := json.Unmarshal([]byte(line), &nResult); err == nil {
+								// Skip duplicate ports
+								if seenNaabuPorts[nResult.Port] {
+									continue
+								}
+								seenNaabuPorts[nResult.Port] = true
+
+								// Use OnConflict to handle race condition between Uncover and Naabu
+								db.Clauses(clause.OnConflict{
+									Columns:   []clause.Column{{Name: "target_id"}, {Name: "port"}},
+									DoNothing: true,
+								}).Create(&database.Port{
+									TargetID: t.ID,
+									Port:     nResult.Port,
+									Protocol: "tcp",
+									Service:  "unknown",
+								})
+								portsFound++
+								// Collect for Stage 3
+								targetPorts = append(targetPorts, nResult.Port)
+							}
+						}
+						if portsFound > 0 {
+							utils.LogSuccess("[Scanner] [Naabu] Found %d open ports on %s", portsFound, t.Value)
 						}
 
-						if err != nil {
-							utils.LogError("[Scanner] Nmap failed for %s: %v", t.Value, err)
-						} else {
-							utils.LogSuccess("[Scanner] [Nmap] Enriched %d services on %s", len(nResults), t.Value)
-							// Save results
+						// --- STAGE 3: Nmap Service Enumeration ---
+						var nResults []modules.NmapResult
+						if len(targetPorts) > 0 {
+							nm := modules.Get("nmap")
+							// Type assertion to access CustomScan
+							if nmapMod, ok := nm.(*modules.Nmap); ok && nmapMod.CheckInstalled() {
+								var err error
+								var nmapRaw string
+								nResults, nmapRaw, err = nmapMod.CustomScan(ctx, t.Value, targetPorts)
+
+								// Record Raw Nmap Output
+								if nmapRaw != "" {
+									recordResult(db, t.ID, "nmap", nmapRaw)
+								}
+
+								if err != nil {
+									utils.LogError("[Scanner] Nmap failed for %s: %v", t.Value, err)
+								} else {
+									utils.LogSuccess("[Scanner] [Nmap] Enriched %d services on %s", len(nResults), t.Value)
+									// Save results
+									for _, res := range nResults {
+										db.Model(&database.Port{}).
+											Where("target_id = ? AND port = ?", t.ID, res.Port).
+											Updates(map[string]interface{}{
+												"service": res.Service,
+												"product": res.Product,
+												"version": res.Version,
+												"scripts": res.Scripts,
+											})
+									}
+								}
+							}
+
+							// --- STAGE 4: Web Probing (Httpx) ---
+							var httpUrls []string
+							seenPorts := make(map[int]bool)
+
+							addPort := func(port int) {
+								if seenPorts[port] {
+									return
+								}
+								seenPorts[port] = true
+								proto := "http"
+								if port == 443 || port == 8443 {
+									proto = "https"
+								}
+								httpUrls = append(httpUrls, fmt.Sprintf("%s://%s:%d", proto, t.Value, port))
+							}
+
 							for _, res := range nResults {
-								db.Model(&database.Port{}).
-									Where("target_id = ? AND port = ?", t.ID, res.Port).
-									Updates(map[string]interface{}{
-										"service": res.Service,
-										"product": res.Product,
-										"version": res.Version,
-										"scripts": res.Scripts,
-									})
+								addPort(res.Port)
 							}
-						}
-					}
-
-					// --- STAGE 4: Web Probing (Httpx) ---
-					// Filter for HTTP services from Nmap results
-					var httpUrls []string
-					for _, res := range nResults {
-						if strings.Contains(res.Service, "http") ||
-							strings.Contains(res.Service, "ssl") ||
-							res.Port == 80 || res.Port == 443 || res.Port == 8080 || res.Port == 8443 {
-
-							protocol := "http"
-							if strings.Contains(res.Service, "ssl") || strings.Contains(res.Service, "https") || res.Port == 443 || res.Port == 8443 {
-								protocol = "https"
+							for _, port := range targetPorts {
+								addPort(port)
 							}
-							url := fmt.Sprintf("%s://%s:%d", protocol, t.Value, res.Port)
-							httpUrls = append(httpUrls, url)
-						}
-					}
 
-					if len(httpUrls) > 0 {
-						utils.LogInfo("[Scanner] Triggering Httpx Stage 4 for %d URLs on %s", len(httpUrls), t.Value)
-						httpxMod := modules.Get("httpx")
-						if hx, ok := httpxMod.(*modules.Httpx); ok && hx.CheckInstalled() {
-							webResults, err := hx.RunRich(ctx, httpUrls)
-							if err != nil {
-								utils.LogError("[Scanner] Httpx Stage 4 failed: %v", err)
-							} else {
-								// Save WebAssets
-								count := 0
-								for _, w := range webResults {
-									// Skip completely empty results if any
-									if w.URL == "" {
-										continue
-									}
+							utils.LogDebug("[Scanner] Prepared %d URLs for Httpx probing on %s", len(httpUrls), t.Value)
 
-									// Run Wappalyzer analysis
-									wapp := modules.Get("wappalyzer")
-									if wappalyzer, ok := wapp.(*modules.Wappalyzer); ok {
-										// Httpx result doesn't explicitly separate headers/body in the struct I defined?
-										// I need to check HttpxResult struct.
-										// Assuming w.Response contains everything?
-										// Actually HttpxResult has `Response` field but I need to parse it or use headers/body separation.
-										// Since simple wappalyzergo takes map[string][]string for headers, I might need to simulate it
-										// if httpx doesn't provide structured headers.
-										// OR just rely on body signature for now?
-										// Realistically, the httpx JSON output might merge response.
-										// But let's check what I have. I have `w.Response`.
-										// If `w.Response` is empty (no -include-response?), I skip.
-										// But I added -include-response to RunRich.
-
-										// Basic header parsing (very naive)
-										headers := make(map[string][]string)
-										// TODO: better parsing if needed.
-										// For now, let's just use body analysis on the whole response string if library supports it?
-										// Wappalyzergo Fingerprint takes (headers, body).
-
-										bodyBytes := []byte(w.Response)
-										// Note: w.Response usually includes status line and headers in httpx text output?
-										// In JSON, `response` field might be raw.
-
-										extraTech := wappalyzer.Analyze(headers, bodyBytes)
-
-										// Merge unique
-										existing := make(map[string]bool)
-										for _, t := range w.Tech {
-											existing[t] = true
-										}
-										for _, t := range extraTech {
-											if !existing[t] {
-												w.Tech = append(w.Tech, t)
-												existing[t] = true
+							if len(httpUrls) > 0 {
+								utils.LogInfo("[Scanner] Triggering Httpx Stage 4 for %d URLs on %s", len(httpUrls), t.Value)
+								httpxMod := modules.Get("httpx")
+								if hx, ok := httpxMod.(*modules.Httpx); ok && hx.CheckInstalled() {
+									webResults, err := hx.RunRich(ctx, httpUrls)
+									if err != nil {
+										utils.LogError("[Scanner] Httpx Stage 4 failed: %v", err)
+									} else {
+										// Save WebAssets
+										count := 0
+										for _, w := range webResults {
+											// Skip completely empty results if any
+											if w.URL == "" {
+												continue
 											}
-										}
 
-										// Record Wappalyzer "Raw" Log (Synthesized)
-										if len(w.Tech) > 0 {
-											wappLog := fmt.Sprintf("Target: %s\nDetected Technologies:\n%s", w.URL, strings.Join(w.Tech, ", "))
-											recordResult(db, t.ID, "wappalyzer", wappLog)
-										}
-									}
+											// Run Wappalyzer analysis
+											wapp := modules.Get("wappalyzer")
+											if wappalyzer, ok := wapp.(*modules.Wappalyzer); ok {
 
-									// Convert tech stack slice to string
-									techStr := strings.Join(w.Tech, ", ")
+												headers := make(map[string][]string)
 
-									db.Clauses(clause.OnConflict{
-										Columns: []clause.Column{{Name: "target_id"}, {Name: "url"}},
-										DoUpdates: clause.AssignmentColumns([]string{
-											"title", "tech_stack", "web_server", "status_code",
-											"content_len", "word_count", "line_count", "content_type",
-											"location", "ip", "cname", "cdn", "response", "updated_at",
-										}),
-									}).Create(&database.WebAsset{
-										TargetID:    t.ID,
-										URL:         w.URL,
-										Title:       w.Title,
-										TechStack:   techStr,
-										WebServer:   w.WebServer,
-										StatusCode:  w.StatusCode,
-										ContentLen:  w.ContentLen,
-										WordCount:   w.WordCount,
-										LineCount:   w.LineCount,
-										ContentType: w.ContentType,
-										Location:    w.Location,
-										IP:          strings.Join(w.A, ", "),
-										CNAME:       strings.Join(w.CNAMEs, ", "),
-										CDN:         w.CDNName,
-										Response:    "",
-									})
-									count++
-								}
+												bodyBytes := []byte(w.Response)
 
-								utils.LogSuccess("[Scanner] [Httpx] Enriched %d web assets on %s", count, t.Value)
+												extraTech := wappalyzer.Analyze(headers, bodyBytes)
 
-								// --- STAGE 5: Visual Inspection (Gowitness) ---
-								// Trigger screenshots for newly added/found web assets
-								gw := modules.Get("gowitness")
-								if gowitness, ok := gw.(*modules.Gowitness); ok && gowitness.CheckInstalled() {
-									utils.LogInfo("[Scanner] Triggering Gowitness Stage 5 for %d URLs on %s", count, t.Value)
-									for _, w := range webResults {
-										if w.URL == "" {
-											continue
-										}
+												// Merge unique
+												existing := make(map[string]bool)
+												for _, t := range w.Tech {
+													existing[t] = true
+												}
+												for _, t := range extraTech {
+													if !existing[t] {
+														w.Tech = append(w.Tech, t)
+														existing[t] = true
+													}
+												}
 
-										shotPath, gwOut, err := gowitness.RunSingle(ctx, w.URL)
-
-										// Record Raw Gowitness CLI Output
-										if gwOut != "" {
-											// Deduplicate? Or just append? Tools recordResult usually stores separate entries or appends?
-											// recordResult creates a new entry for each call.
-											// Users usually want to see the sequence.
-											recordResult(db, t.ID, "gowitness", gwOut)
-										}
-
-										if err != nil {
-											// Suppress error as some ports might not have a web server or screenshot fails
-											utils.LogDebug("[Scanner] Gowitness failed for %s: %v", w.URL, err)
-										} else {
-											// Check if file actually exists before saving path
-											if _, err := os.Stat(shotPath); err == nil {
-												// Save screenshot path to DB
-												// Upsert again or just update specific field
-												db.Model(&database.WebAsset{}).
-													Where("target_id = ? AND url = ?", t.ID, w.URL).
-													Update("screenshot", shotPath)
-											} else {
-												utils.LogWarning("[Scanner] Gowitness reported success but file not found at %s", shotPath)
+												// Record Wappalyzer "Raw" Log (Synthesized)
+												if len(w.Tech) > 0 {
+													wappLog := fmt.Sprintf("Target: %s\nDetected Technologies:\n%s", w.URL, strings.Join(w.Tech, ", "))
+													recordResult(db, t.ID, "wappalyzer", wappLog)
+												}
 											}
+
+											// Convert tech stack slice to string
+											techStr := strings.Join(w.Tech, ", ")
+
+											db.Clauses(clause.OnConflict{
+												Columns: []clause.Column{{Name: "target_id"}, {Name: "url"}},
+												DoUpdates: clause.AssignmentColumns([]string{
+													"title", "tech_stack", "web_server", "status_code",
+													"content_len", "word_count", "line_count", "content_type",
+													"location", "ip", "cname", "cdn", "response", "updated_at",
+												}),
+											}).Create(&database.WebAsset{
+												TargetID:    t.ID,
+												URL:         w.URL,
+												Title:       w.Title,
+												TechStack:   techStr,
+												WebServer:   w.WebServer,
+												StatusCode:  w.StatusCode,
+												ContentLen:  w.ContentLen,
+												WordCount:   w.WordCount,
+												LineCount:   w.LineCount,
+												ContentType: w.ContentType,
+												Location:    w.Location,
+												IP:          strings.Join(w.A, ", "),
+												CNAME:       strings.Join(w.CNAMEs, ", "),
+												CDN:         w.CDNName,
+												Response:    "",
+											})
+											count++
 										}
-									}
-								}
 
-								// --- STAGE 6: Katana & URLFinder Execution ---
-								kat := modules.Get("katana")
-								urlF := modules.Get("urlfinder")
+										utils.LogSuccess("[Scanner] [Httpx] Enriched %d web assets on %s", count, t.Value)
 
-								// Check type assertion and install
-								if katanaMod, ok := kat.(*modules.Katana); ok && katanaMod.CheckInstalled() {
-									utils.LogInfo("[Scanner] Triggering Katana Stage 6 for %d URLs on %s", count, t.Value)
-									for _, w := range webResults {
-										if w.URL == "" {
-											continue
-										}
+										// --- STAGES 5-6: Parallel Web Asset Processing ---
+										// Run Gowitness, Katana, URLFinder concurrently per URL
+										gw := modules.Get("gowitness")
+										kat := modules.Get("katana")
+										urlF := modules.Get("urlfinder")
 
-										// Collect all unique paths from both tools
-										uniquePaths := make(map[string]bool)
-										var pathsList []string
+										gowitnessMod, gwOk := gw.(*modules.Gowitness)
+										katanaMod, katOk := kat.(*modules.Katana)
+										urlMod, urlOk := urlF.(*modules.Urlfinder)
 
-										// Helper to process line-based output
-										processOutput := func(rawOutput string) {
-											lines := strings.Split(rawOutput, "\n")
-											for _, line := range lines {
-												line = strings.TrimSpace(line)
-												if line == "" {
+										// Cache installation checks to avoid repeated lookups
+										gwInstalled := gwOk && gowitnessMod.CheckInstalled()
+										katInstalled := katOk && katanaMod.CheckInstalled()
+										urlInstalled := urlOk && urlMod.CheckInstalled()
+
+										if gwInstalled || katInstalled {
+											utils.LogInfo("[Scanner] Triggering parallel web asset processing for %d URLs on %s", count, t.Value)
+
+											var webWG sync.WaitGroup
+											sem := make(chan struct{}, 10) // Limit to 10 concurrent web asset operations
+
+											for _, w := range webResults {
+												if w.URL == "" {
 													continue
 												}
 
-												// Naive URL parsing
-												if strings.HasPrefix(line, "http") {
-													parts := strings.SplitN(line, "://", 2)
-													if len(parts) == 2 {
-														pathParts := strings.SplitN(parts[1], "/", 2)
-														if len(pathParts) == 2 {
-															pathVal := "/" + pathParts[1]
-															if !uniquePaths[pathVal] {
-																uniquePaths[pathVal] = true
-																pathsList = append(pathsList, pathVal)
-															}
+												webWG.Add(1)
+												go func(webResult modules.HttpxResult) {
+													defer webWG.Done()
+													sem <- struct{}{}        // Acquire semaphore
+													defer func() { <-sem }() // Release semaphore
+
+													// --- Gowitness Screenshot ---
+													if gwInstalled {
+														shotPath, gwOut, err := gowitnessMod.RunSingle(ctx, webResult.URL)
+														if gwOut != "" {
+															recordResult(db, t.ID, "gowitness", gwOut)
+														}
+														if err != nil {
+															utils.LogDebug("[Scanner] Gowitness failed for %s: %v", webResult.URL, err)
 														} else {
-															// Root
-															if !uniquePaths["/"] {
-																uniquePaths["/"] = true
-																pathsList = append(pathsList, "/")
+															if _, err := os.Stat(shotPath); err == nil {
+																db.Model(&database.WebAsset{}).
+																	Where("target_id = ? AND url = ?", t.ID, webResult.URL).
+																	Update("screenshot", shotPath)
 															}
 														}
 													}
-												} else {
-													// Relative path or other
-													if !uniquePaths[line] {
-														uniquePaths[line] = true
-														pathsList = append(pathsList, line)
+
+													// --- Katana & URLFinder ---
+													if katOk && katanaMod.CheckInstalled() {
+														uniquePaths := make(map[string]bool)
+														var pathsList []string
+														var pathsMu sync.Mutex
+
+														processOutput := func(rawOutput string) {
+															lines := strings.Split(rawOutput, "\n")
+															pathsMu.Lock()
+															defer pathsMu.Unlock()
+															for _, line := range lines {
+																line = strings.TrimSpace(line)
+																if line == "" {
+																	continue
+																}
+																if strings.HasPrefix(line, "http") {
+																	parts := strings.SplitN(line, "://", 2)
+																	if len(parts) == 2 {
+																		pathParts := strings.SplitN(parts[1], "/", 2)
+																		if len(pathParts) == 2 {
+																			pathVal := "/" + pathParts[1]
+																			if !uniquePaths[pathVal] {
+																				uniquePaths[pathVal] = true
+																				pathsList = append(pathsList, pathVal)
+																			}
+																		} else {
+																			if !uniquePaths["/"] {
+																				uniquePaths["/"] = true
+																				pathsList = append(pathsList, "/")
+																			}
+																		}
+																	}
+																} else {
+																	if !uniquePaths[line] {
+																		uniquePaths[line] = true
+																		pathsList = append(pathsList, line)
+																	}
+																}
+															}
+														}
+
+														// Run Katana
+														args := []string{"-jc", "-kf", "all", "-fx", "-d", "5", "-pc", "-c", "20"}
+														katanaOutput, err := katanaMod.RunCustom(ctx, webResult.URL, args)
+														recordResult(db, t.ID, "katana", katanaOutput)
+														if err == nil {
+															processOutput(katanaOutput)
+														}
+
+														// Run URLFinder
+														if urlInstalled {
+															var hostname string
+															if strings.Contains(webResult.URL, "://") {
+																parts := strings.Split(webResult.URL, "://")
+																if len(parts) > 1 {
+																	subParts := strings.Split(parts[1], "/")
+																	hostname = subParts[0]
+																	if strings.Contains(hostname, ":") {
+																		hParts := strings.Split(hostname, ":")
+																		hostname = hParts[0]
+																	}
+																}
+															}
+															if hostname != "" {
+																urlOutput, err := urlMod.Run(ctx, hostname)
+																recordResult(db, t.ID, "urlfinder", urlOutput)
+																if err == nil {
+																	processOutput(urlOutput)
+																}
+															}
+														}
+
+														// Save combined paths
+														sort.Strings(pathsList)
+														jsonBytes, _ := json.Marshal(pathsList)
+														db.Model(&database.WebAsset{}).
+															Where("target_id = ? AND url = ?", t.ID, webResult.URL).
+															Update("katana_output", string(jsonBytes))
 													}
-												}
+												}(w)
 											}
+											webWG.Wait()
 										}
-
-										// 1. Run Katana
-										// katana -u https://adriaanbosch.com/hax0r -jc -kf all -fx -d 5 -pc
-										args := []string{"-jc", "-kf", "all", "-fx", "-d", "5", "-pc"}
-										katanaOutput, err := katanaMod.RunCustom(ctx, w.URL, args)
-										recordResult(db, t.ID, "katana", katanaOutput)
-
-										if err != nil {
-											utils.LogDebug("[Scanner] Katana failed for %s: %v", w.URL, err)
-										} else {
-											processOutput(katanaOutput)
-										}
-
-										// 2. Run URLFinder
-										if urlMod, ok := urlF.(*modules.Urlfinder); ok && urlMod.CheckInstalled() {
-											// Extract hostname for -d flag
-											// w.URL is like https://example.com/foo
-											// We need 'example.com' or whatever hostname Httpx found
-											// Use simple string manipulation or parse
-											var hostname string
-											if strings.Contains(w.URL, "://") {
-												parts := strings.Split(w.URL, "://")
-												if len(parts) > 1 {
-													subParts := strings.Split(parts[1], "/")
-													hostname = subParts[0]
-													// Remove port if exists? urlfinder might want domain only?
-													// "adriaanbosch.com:443" -> "adriaanbosch.com"
-													if strings.Contains(hostname, ":") {
-														hParts := strings.Split(hostname, ":")
-														hostname = hParts[0]
-													}
-												}
-											}
-
-											if hostname != "" {
-												// Run urlfinder -d hostname -all -silent
-												utils.LogInfo("[Scanner] Running URLFinder on %s...", hostname)
-												urlOutput, err := urlMod.Run(ctx, hostname)
-												recordResult(db, t.ID, "urlfinder", urlOutput)
-
-												if err != nil {
-													utils.LogDebug("[Scanner] URLFinder failed for %s: %v", hostname, err)
-												} else {
-													processOutput(urlOutput)
-												}
-											}
-										}
-
-										// Sort paths
-										sort.Strings(pathsList)
-
-										// Convert to JSON
-										jsonBytes, _ := json.Marshal(pathsList)
-										jsonOutput := string(jsonBytes)
-
-										// Save Combined Output (JSON Paths) to DB
-										// We overwrite 'katana_output' field to effectively merge visual result
-										db.Model(&database.WebAsset{}).
-											Where("target_id = ? AND url = ?", t.ID, w.URL).
-											Update("katana_output", jsonOutput)
-
 									}
 								}
 							}
 						}
 					}
 				}
-			}
+			}()
 		}
+		workerWG.Wait()
 	} else {
 		utils.LogWarning("[Scanner] Naabu missing, draining pipeline...")
 		for range targetsChan {
@@ -752,181 +709,12 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 	utils.LogSuccess("[Scanner] Pipeline Completed for %s", parsed.Value)
 
 	// --- STAGE 7: Smart Vulnerability Scan ---
-	sm.runSmartScan(ctx, db, targetObj)
+	// DISABLED: Nuclei and Cvemap scanning
+	// sm.runSmartScan(ctx, db, targetObj)
 }
 
-func (sm *ScanManager) runSmartScan(ctx context.Context, db *gorm.DB, targetObj database.Target) {
-	utils.LogInfo("[Scanner] Starting Stage 7: Smart Vulnerability Scan for %s", targetObj.Value)
-
-	// 1. Gather Context & URLs
-	techSet := make(map[string]bool)
-	versionMap := make(map[string]string) // Product -> Version
-	var targetURLs []string
-
-	// A. From WebAssets
-	var webAssets []database.WebAsset
-	db.Where("target_id = ?", targetObj.ID).Find(&webAssets)
-	for _, wa := range webAssets {
-		if wa.URL != "" {
-			targetURLs = append(targetURLs, wa.URL)
-		}
-		if wa.TechStack != "" {
-			parts := strings.Split(wa.TechStack, ", ")
-			for _, p := range parts {
-				if p != "" {
-					techSet[strings.ToLower(strings.TrimSpace(p))] = true
-				}
-			}
-		}
-	}
-
-	// B. From Ports (Nmap)
-	var ports []database.Port
-	db.Where("target_id = ?", targetObj.ID).Find(&ports)
-	for _, p := range ports {
-		if p.Product != "" {
-			prod := strings.ToLower(strings.TrimSpace(p.Product))
-			techSet[prod] = true
-			if p.Version != "" {
-				versionMap[prod] = strings.TrimSpace(p.Version)
-			}
-		}
-	}
-
-	if len(techSet) == 0 {
-		utils.LogInfo("[Scanner] No technologies detected for Smart Scan on %s", targetObj.Value)
-		return
-	}
-
-	// 2. Prepare Target List File
-	// Nuclei works best with a list of URLs to scan specific endpoints/ports found
-	var targetFile string
-	if len(targetURLs) > 0 {
-		f, err := os.CreateTemp("", "nuclei_targets_*.txt")
-		if err == nil {
-			defer os.Remove(f.Name())
-			for _, u := range targetURLs {
-				if _, err := f.WriteString(u + "\n"); err != nil {
-					utils.LogDebug("Failed to write to nuclei target file: %v", err)
-				}
-			}
-			f.Close()
-			targetFile = f.Name()
-		}
-	}
-	// Fallback to domain if no URLs or file error
-	if targetFile == "" {
-		targetFile = targetObj.Value // Treat as single target args
-	}
-
-	// 3. Prepare Tags
-	var tags []string
-	for t := range techSet {
-		// Simple sanitization: replace spaces with -, keep alphanumeric
-		// e.g. "Apache HTTP Server" -> "apache-http-server"
-		// This is a heuristic.
-		safe := strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-				return r
-			}
-			return '-'
-		}, t)
-		// Clean multiple dashes
-		// For MVP just use it.
-		if safe != "" {
-			tags = append(tags, safe)
-		}
-	}
-
-	// 4. Advanced: Get CVEs for Versions
-	var cveIDs []string
-	cveMapMod := modules.Get("cvemap")
-	if cm, ok := cveMapMod.(*modules.Cvemap); ok && cm.CheckInstalled() && len(versionMap) > 0 {
-		utils.LogInfo("[Scanner] Querying Cvemap for %d detected products...", len(versionMap))
-		for prod, ver := range versionMap {
-			// clean prod name for query?
-			// cvemap query: product:"apache" version:"2.4.49"
-			query := fmt.Sprintf("product:\"%s\" version:\"%s\"", prod, ver)
-			jsonOut, err := cm.Search(ctx, query)
-			if err == nil {
-				// Parse JSON output
-				// Output is stream of JSON objects
-				lines := strings.Split(jsonOut, "\n")
-				type CveStub struct {
-					CveID string `json:"cve_id"`
-				}
-				for _, line := range lines {
-					if strings.TrimSpace(line) == "" {
-						continue
-					}
-					var stub CveStub
-					if json.Unmarshal([]byte(line), &stub) == nil && stub.CveID != "" {
-						cveIDs = append(cveIDs, stub.CveID)
-					}
-				}
-			}
-		}
-	}
-
-	// 5. Run Nuclei Passes
-	nucleiMod := modules.Get("nuclei")
-	nm, ok := nucleiMod.(*modules.Nuclei)
-	if !ok || !nm.CheckInstalled() {
-		utils.LogWarning("[Scanner] Nuclei not available for Smart Scan.")
-		return
-	}
-
-	// Pass A: Tags
-	if len(tags) > 0 {
-		// Limit tags to avoid too huge command?
-		tagStr := strings.Join(tags, ",")
-		utils.LogInfo("[Scanner] Running Smart Nuclei Tags: %s", tagStr)
-
-		args := []string{"-silent", "-tags", tagStr, "-severity", "critical,high"}
-		if strings.Contains(targetFile, "nuclei_targets") {
-			args = append(args, "-l", targetFile)
-		} else {
-			args = append(args, "-u", targetFile)
-		}
-
-		out, err := nm.RunRaw(ctx, args)
-		recordResult(db, targetObj.ID, "nuclei-smart-tags", out)
-		if err != nil {
-			utils.LogDebug("Nuclei tags scan error/found: %v", err)
-		}
-	}
-
-	// Pass B: Specific CVEs
-	if len(cveIDs) > 0 {
-		// Deduplicate
-		uniqueIDs := make(map[string]bool)
-		var cleanIDs []string
-		for _, id := range cveIDs {
-			if !uniqueIDs[id] {
-				uniqueIDs[id] = true
-				cleanIDs = append(cleanIDs, id)
-			}
-		}
-
-		if len(cleanIDs) > 0 {
-			idStr := strings.Join(cleanIDs, ",")
-			utils.LogInfo("[Scanner] Running Smart Nuclei CVEs: %d identified", len(cleanIDs))
-
-			args := []string{"-silent", "-id", idStr}
-			if strings.Contains(targetFile, "nuclei_targets") {
-				args = append(args, "-l", targetFile)
-			} else {
-				args = append(args, "-u", targetFile)
-			}
-
-			out, err := nm.RunRaw(ctx, args)
-			recordResult(db, targetObj.ID, "nuclei-smart-cves", out)
-			if err != nil {
-				utils.LogDebug("Nuclei CVE scan error/found: %v", err)
-			}
-		}
-	}
-}
+// runSmartScan is disabled - uncomment the call in runScanLogic line 713 to re-enable
+// func (sm *ScanManager) runSmartScan(ctx context.Context, db *gorm.DB, targetObj database.Target) { ... }
 
 func recordResult(db *gorm.DB, targetID uint, tool, output string) {
 	db.Create(&database.ScanResult{

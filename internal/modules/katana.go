@@ -31,9 +31,9 @@ func (k *Katana) Install() error {
 
 func (k *Katana) Run(ctx context.Context, target string) (string, error) {
 	utils.LogInfo("Running katana on %s...", target)
-	// -u target -jc -kf all -fx -d 5 -pc -silent
+	// -u target -jc -kf all -fx -d 5 -pc -c 20 -silent (optimized for speed)
 	path := utils.ResolveBinaryPath("katana")
-	cmd := exec.CommandContext(ctx, path, "-u", target, "-jc", "-kf", "all", "-fx", "-d", "5", "-pc", "-silent")
+	cmd := exec.CommandContext(ctx, path, "-u", target, "-jc", "-kf", "all", "-fx", "-d", "5", "-pc", "-c", "20", "-silent")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("katana failed: %v\nOutput: %s", err, output)

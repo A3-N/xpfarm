@@ -69,12 +69,12 @@ func (h *Httpx) RunRich(ctx context.Context, urls []string) ([]HttpxResult, erro
 	utils.LogInfo("Running httpx rich scan on %d urls...", len(urls))
 	path := utils.ResolveBinaryPath("httpx")
 
-	// Flags requested: -status-code -content-type -content-length -location -title -web-server -tech-detect -ip -cname -word-count -line-count -cdn -include-response -follow-host-redirects -max-redirects 2 -json
+	// Flags requested: -status-code -content-type -content-length -location -title -web-server -tech-detect -ip -cname -word-count -line-count -cdn -include-response -follow-host-redirects -max-redirects 2 -threads 50 -json
 	args := []string{
 		"-status-code", "-content-type", "-content-length", "-location", "-title",
 		"-web-server", "-tech-detect", "-ip", "-cname", "-word-count", "-line-count",
 		"-cdn", "-include-response", "-follow-host-redirects", "-max-redirects", "2",
-		"-json", "-silent",
+		"-threads", "50", "-json", "-silent",
 	}
 
 	cmd := exec.CommandContext(ctx, path, args...)
@@ -99,6 +99,9 @@ func (h *Httpx) RunRich(ctx context.Context, urls []string) ([]HttpxResult, erro
 		// Httpx checks might fail for some but still return data.
 		// If output is present, try to parse it.
 		utils.LogDebug("httpx finished with error: %v (output length: %d)", err, len(output))
+		if len(output) > 0 {
+			utils.LogDebug("httpx error output: %s", string(output))
+		}
 	}
 
 	var results []HttpxResult

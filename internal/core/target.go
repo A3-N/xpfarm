@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 	"xpfarm/pkg/utils"
 )
 
@@ -56,8 +57,17 @@ type TargetCheckResult struct {
 	ResolvedIPs  []string
 }
 
+// dnsCache stores DNS resolution results to avoid redundant lookups
+var dnsCache sync.Map
+
 // ResolveAndCheck performs DNS resolution and checks Cloudflare status and Liveness
+// Results are cached for successful resolutions to improve performance
 func ResolveAndCheck(input string) TargetCheckResult {
+	// Check cache first
+	if cached, ok := dnsCache.Load(input); ok {
+		return cached.(TargetCheckResult)
+	}
+
 	parsed := ParseTarget(input)
 	res := TargetCheckResult{
 		Status:  "down",
@@ -118,6 +128,11 @@ func ResolveAndCheck(input string) TargetCheckResult {
 	if len(ips) == 0 {
 		res.IsAlive = false
 		res.Status = "unreachable"
+	}
+
+	// Cache successful resolutions to avoid redundant DNS lookups
+	if res.IsAlive {
+		dnsCache.Store(input, res)
 	}
 
 	return res

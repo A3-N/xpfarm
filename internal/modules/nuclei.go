@@ -45,7 +45,11 @@ func (n *Nuclei) RunRaw(ctx context.Context, args []string) (string, error) {
 	utils.LogInfo("Running nuclei with args: %v", args)
 	path := utils.ResolveBinaryPath("nuclei")
 
-	cmd := exec.CommandContext(ctx, path, args...)
+	// Add concurrency optimization flags
+	baseArgs := []string{"-c", "25", "-rl", "150"}
+	fullArgs := append(baseArgs, args...)
+
+	cmd := exec.CommandContext(ctx, path, fullArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(output), fmt.Errorf("nuclei failed: %v", err)

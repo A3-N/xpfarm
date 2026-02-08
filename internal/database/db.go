@@ -24,6 +24,23 @@ func InitDB() {
 		log.Fatal("failed to connect database:", err)
 	}
 
+	// SQLite Performance Optimizations
+	sqlDB, err := DB.DB()
+	if err == nil {
+		if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL"); err != nil {
+			log.Printf("Warning: failed to set journal_mode: %v", err)
+		}
+		if _, err := sqlDB.Exec("PRAGMA synchronous=NORMAL"); err != nil {
+			log.Printf("Warning: failed to set synchronous: %v", err)
+		}
+		if _, err := sqlDB.Exec("PRAGMA cache_size=-64000"); err != nil { // 64MB cache
+			log.Printf("Warning: failed to set cache_size: %v", err)
+		}
+		if _, err := sqlDB.Exec("PRAGMA busy_timeout=5000"); err != nil {
+			log.Printf("Warning: failed to set busy_timeout: %v", err)
+		}
+	}
+
 	// Migrate the schema
 	err = DB.AutoMigrate(&Asset{}, &Target{}, &ScanResult{}, &Setting{}, &Port{}, &WebAsset{}, &Vulnerability{})
 	if err != nil {

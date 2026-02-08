@@ -31,9 +31,9 @@ func (n *Naabu) Install() error {
 
 func (n *Naabu) Run(ctx context.Context, target string) (string, error) {
 	utils.LogInfo("Running naabu on %s...", target)
-	// -host target -json -silent -top-ports 100 (fast scan for MVP)
+	// -host target -json -silent -top-ports 100 -c 50 -rate 1000 (optimized for speed)
 	path := utils.ResolveBinaryPath("naabu")
-	cmd := exec.CommandContext(ctx, path, "-host", target, "-json", "-silent", "-top-ports", "100")
+	cmd := exec.CommandContext(ctx, path, "-host", target, "-json", "-silent", "-top-ports", "100", "-c", "50", "-rate", "1000")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("naabu failed: %v\nOutput: %s", err, output)

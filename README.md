@@ -25,3 +25,8 @@ docker-compose up --build
 docker build -t xpfarm .
 docker run -p 8888:8888 -v $(pwd)/data:/app/data -v $(pwd)/screenshots:/app/screenshots xpfarm
 ```
+
+## TODO
+
+- [ ] Redefine scan
+- [ ] Vuln scan change
