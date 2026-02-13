@@ -28,5 +28,7 @@ docker run -p 8888:8888 -v $(pwd)/data:/app/data -v $(pwd)/screenshots:/app/scre
 
 ## TODO
 
-- [ ] Redefine scan
+- [x] Redefine scan
 - [ ] Vuln scan change
+- [ ] Custom Module
+- [ ] Agent Hell
