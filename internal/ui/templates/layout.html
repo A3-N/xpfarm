@@ -34,6 +34,46 @@
             overflow: hidden;
         }
 
+        /* Animations */
+
+
+        @keyframes glitch {
+            0% {
+                transform: translate(0);
+            }
+
+            20% {
+                transform: translate(-2px, 2px);
+            }
+
+            40% {
+                transform: translate(-2px, -2px);
+            }
+
+            60% {
+                transform: translate(2px, 2px);
+            }
+
+            80% {
+                transform: translate(2px, -2px);
+            }
+
+            100% {
+                transform: translate(0);
+            }
+        }
+
+        @keyframes scanline {
+            0% {
+                transform: translateY(-100%);
+            }
+
+            100% {
+                transform: translateY(100vh);
+            }
+        }
+
+        /* Sidebar & Collapse */
         .sidebar {
             width: 300px;
             background-color: var(--bg-sidebar);
@@ -43,31 +83,155 @@
             padding: 20px;
             flex-shrink: 0;
             overflow-y: auto;
+            position: relative;
+            z-index: 10;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
         }
 
-        .logo {
-            font-size: 1.5rem;
+        .sidebar.collapsed {
+            width: 80px;
+            padding: 20px 10px;
+        }
+
+        /* Collapsed State Logic */
+        .short-text {
+            display: none;
+        }
+
+        .sidebar.collapsed .full-text {
+            display: none !important;
+        }
+
+        .sidebar.collapsed .short-text {
+            display: block;
+            font-size: 1.2rem;
             font-weight: 700;
+            color: var(--color-text);
+            text-align: center;
+        }
+
+        .sidebar.collapsed .nav-link.active .short-text {
             color: var(--color-primary);
-            margin-bottom: 30px;
+        }
+
+        .sidebar.collapsed .logo {
+            margin-bottom: 20px;
+            justify-content: center;
+            padding: 0;
+        }
+
+        .sidebar.collapsed .logo svg {
+            display: none;
+        }
+
+        /* Mini Logo for collapsed state */
+        .sidebar.collapsed .logo::after {
+            content: 'xp';
+            font-weight: 900;
+            font-size: 1.5rem;
+            color: var(--color-primary);
+            display: block;
+            filter: drop-shadow(0 0 5px rgba(139, 92, 246, 0.3));
+        }
+
+        .sidebar.collapsed .nav-link,
+        .sidebar.collapsed summary {
+            justify-content: center;
+            padding: 15px 0;
+            text-align: center;
+        }
+
+        /* Hide sub-menus and toggle icons when collapsed */
+        .sidebar.collapsed summary::after {
+            display: none;
+        }
+
+        .sidebar.collapsed .sub-menu {
+            display: none !important;
+        }
+
+        /* Toggle Button */
+        .toggle-btn {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--color-muted);
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
-            gap: 10px;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 20;
+            transition: all 0.2s;
         }
 
-        .logo span {
-            color: var(--color-secondary);
+        .sidebar.collapsed .toggle-btn {
+            right: 25px;
+            transform: rotate(180deg);
         }
 
-        .nav-links {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-            flex-grow: 1;
+        .toggle-btn:hover {
+            color: var(--color-text);
+            background: var(--bg-hover);
         }
 
-        .nav-item {
-            margin-bottom: 5px;
+        /* Scanline - Sidebar Only */
+        .scanline-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 0;
+        }
+
+        .scanline-overlay {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.1) 50%, rgba(0, 0, 0, 0.1));
+            background-size: 100% 4px;
+            opacity: 0.15;
+            position: absolute;
+        }
+
+        .scanline-line {
+            width: 100%;
+            height: 2px;
+            background: rgba(139, 92, 246, 0.5);
+            opacity: 0.10;
+            animation: scanline 15s linear infinite;
+            position: absolute;
+            filter: blur(1px);
+            box-shadow: 0 0 5px rgba(139, 92, 246, 0.1);
+        }
+
+        /* --- Original Styles --- */
+        .logo {
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+            position: relative;
+        }
+
+        .logo svg {
+            width: 140px;
+            height: auto;
+            filter: drop-shadow(0 0 5px rgba(139, 92, 246, 0.3));
+            transition: filter 0.3s;
+        }
+
+        .logo:hover svg {
+            animation: glitch 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) both infinite;
+            filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.6));
         }
 
         .nav-link {
@@ -78,6 +242,24 @@
             text-decoration: none;
             transition: all 0.2s;
             font-weight: 500;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .nav-link::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 3px;
+            height: 100%;
+            background-color: var(--color-primary);
+            transform: scaleY(0);
+            transition: transform 0.2s;
+        }
+
+        .nav-link:hover::before {
+            transform: scaleY(1);
         }
 
         .nav-link:hover,
@@ -89,6 +271,13 @@
         .nav-link.active {
             color: var(--color-primary);
             border-left: 3px solid var(--color-primary);
+        }
+
+        .nav-links {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            flex-grow: 1;
         }
 
         /* Dropdown Styles */
@@ -103,7 +292,6 @@
             font-weight: 500;
             cursor: pointer;
             list-style: none;
-            /* Hide default triangle */
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -171,6 +359,12 @@
             flex-direction: column;
         }
 
+        /* [Additional styles for cards, tables, buttons, inputs etc. would be here, 
+           assuming they are inherited or we rely on the ones I saw in view_file earlier. 
+           Wait, if I overwrite the whole file I need to Include ALL existing styles.
+           I saw lines 180-340 containing styles for inputs, cards, etc. in Step 452.
+           I MUST include them.]
+        */
         h1 {
             font-size: 1.8rem;
             margin: 0 0 20px 0;
@@ -284,7 +478,6 @@
             border-color: var(--color-primary);
         }
 
-        /* File Input Styling */
         input[type="file"] {
             background-color: #050505;
             padding: 10px;
@@ -340,15 +533,61 @@
 </head>
 
 <body>
-    <div class="sidebar">
-        <div class="logo">XP<span>Farm</span></div>
+    <!-- Main Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <!-- Scanlines (Sidebar Only) -->
+        <div class="scanline-container">
+            <div class="scanline-overlay"></div>
+            <div class="scanline-line"></div>
+        </div>
+
+        <div class="logo">
+            <!-- SVG Logo (Full) -->
+            <svg viewBox="0 0 200 60" xmlns="http://www.w3.org/2000/svg">
+                <!-- xp in Purple (#8b5cf6) -->
+                <!-- x -->
+                <path d="M20,20 L40,40 M40,20 L20,40" stroke="#8b5cf6" stroke-width="4" fill="none"
+                    stroke-linecap="round" stroke-linejoin="round" style="filter: url(#shaky);" />
+                <!-- p -->
+                <path d="M50,20 L50,55 M50,25 C65,25 65,40 50,40" stroke="#8b5cf6" stroke-width="4" fill="none"
+                    stroke-linecap="round" stroke-linejoin="round" style="filter: url(#shaky);" />
+
+                <!-- farm in Green (#10b981) -->
+                <!-- f -->
+                <path d="M85,15 C85,10 95,10 95,15 M85,15 L85,50 M80,25 L95,25" stroke="#10b981" stroke-width="4"
+                    fill="none" stroke-linecap="round" stroke-linejoin="round" style="filter: url(#shaky);" />
+                <!-- a -->
+                <path d="M115,25 L110,35 L120,35 L115,25 M115,25 L105,50 M115,25 L125,50" stroke="#10b981"
+                    stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"
+                    style="filter: url(#shaky);" />
+                <!-- r -->
+                <path d="M135,50 L135,25 L145,25 C150,25 150,35 145,35 L135,35 M145,35 L155,50" stroke="#10b981"
+                    stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"
+                    style="filter: url(#shaky);" />
+                <!-- m -->
+                <path d="M165,50 L165,25 L172,35 L180,25 L180,50" stroke="#10b981" stroke-width="4" fill="none"
+                    stroke-linecap="round" stroke-linejoin="round" style="filter: url(#shaky);" />
+
+                <defs>
+                    <filter id="shaky">
+                        <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" result="noise" />
+                        <feDisplacementMap in="SourceGraphic" in2="noise" scale="3" />
+                    </filter>
+                </defs>
+            </svg>
+        </div>
+
         <div class="nav-links">
             <!-- Dashboard -->
-            <a href="/" class="nav-link {{if eq .Page `dashboard`}}active{{end}}">Dashboard</a>
+            <a href="/" class="nav-link {{if eq .Page `dashboard`}}active{{end}}" title="Dashboard">
+                <span class="full-text">Dashboard</span><span class="short-text">D</span>
+            </a>
 
             <!-- Assets Dropdown -->
             <details id="nav-assets" {{if eq .Page `assets`}}open{{end}}>
-                <summary>Assets & Targets</summary>
+                <summary title="Assets">
+                    <span class="full-text">Assets & Targets</span><span class="short-text">A</span>
+                </summary>
                 <div class="sub-menu">
                     <a href="/assets" class="sub-link" style="color: var(--color-primary); font-weight: 600;">All
                         Assets</a>
@@ -367,24 +606,37 @@
                 </div>
             </details>
 
-            <!-- Overlord (Coming Soon) -->
-            <a href="/overlord" class="nav-link {{if eq .Page `overlord`}}active{{end}}">Overlord</a>
+            <!-- Overlord -->
+            <a href="/overlord" class="nav-link {{if eq .Page `overlord`}}active{{end}}" title="Overlord">
+                <span class="full-text">Overlord</span><span class="short-text">O</span>
+            </a>
 
             <!-- Separator -->
             <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 15px 0;">
 
             <!-- Modules -->
-            <a href="/modules" class="nav-link {{if eq .Page `modules`}}active{{end}}">Modules</a>
+            <a href="/modules" class="nav-link {{if eq .Page `modules`}}active{{end}}" title="Modules">
+                <span class="full-text">Modules</span><span class="short-text">M</span>
+            </a>
 
-            <!-- Settings Dropdown -->
+            <!-- Settings -->
             <details id="nav-settings" {{if eq .Page `settings`}}open{{end}}>
-                <summary>Settings</summary>
+                <summary title="Settings">
+                    <span class="full-text">Settings</span><span class="short-text">S</span>
+                </summary>
                 <div class="sub-menu">
                     <a href="/settings?tab=env" class="sub-link">Environment Variables</a>
                     <a href="/settings?tab=notifications" class="sub-link">Notification Integration</a>
                 </div>
             </details>
         </div>
+
+        <div class="toggle-btn" onclick="toggleSidebar()">«</div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        {{template "content" .}}
     </div>
 
     <script>
@@ -423,21 +675,45 @@
                 localStorage.setItem(scrollKey, sidebar.scrollTop);
             });
 
-            // Highlight Active Link
-            const currentPath = window.location.pathname;
-            document.querySelectorAll('.nav-link, .sub-link').forEach(link => {
-                if (link.getAttribute('href') === currentPath) {
-                    link.style.color = "var(--color-secondary)";
-                    link.style.fontWeight = "bold";
-                    link.classList.add('active');
-                }
+            // Highlight Active Link Logic (simple CSS check)
+
+            // Auto-expand sidebar on summary click
+            document.querySelectorAll('summary').forEach(s => {
+                s.addEventListener('click', (e) => {
+                    const sb = document.getElementById('sidebar');
+                    if (sb.classList.contains('collapsed')) {
+                        sb.classList.remove('collapsed');
+                        localStorage.setItem('sidebar-collapsed', 'false');
+                        const btn = sb.querySelector('.toggle-btn');
+                        if (btn) btn.textContent = '«';
+
+                        // Ensure it stays open or opens
+                        const details = s.parentElement;
+                        if (details.open) {
+                            e.preventDefault(); // Keep it open if it was already "open" but hidden
+                        }
+                    }
+                });
             });
         });
-    </script>
 
-    <div class="main-content">
-        {{template "content" .}}
-    </div>
+        function toggleSidebar() {
+            const sb = document.getElementById('sidebar');
+            sb.classList.toggle('collapsed');
+            const isCollapsed = sb.classList.contains('collapsed');
+            localStorage.setItem('sidebar-collapsed', isCollapsed);
+
+            // Adjust toggle button arrow
+            const btn = sb.querySelector('.toggle-btn');
+            btn.textContent = isCollapsed ? '»' : '«';
+        }
+
+        // Load sidebar state
+        if (localStorage.getItem('sidebar-collapsed') === 'true') {
+            document.getElementById('sidebar').classList.add('collapsed');
+            document.querySelector('.toggle-btn').textContent = '»';
+        }
+    </script>
 </body>
 
 </html>
