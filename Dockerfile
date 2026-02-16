@@ -1,6 +1,6 @@
 # Base image
 # Using latest to ensure support for modern toolchains (e.g. subfinder needs 1.24+)
-FROM golang:bookworm
+FROM golang:1.25.5-bookworm
 
 # Set working directory
 WORKDIR /app
@@ -26,7 +26,6 @@ RUN go install -v github.com/projectdiscovery/katana/cmd/katana@latest
 RUN go install -v github.com/projectdiscovery/uncover/cmd/uncover@latest
 RUN go install -v github.com/projectdiscovery/urlfinder/cmd/urlfinder@latest
 RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-# Note: cvemap binary is vulnx
 RUN go install -v github.com/projectdiscovery/cvemap/cmd/vulnx@latest
 RUN go install -v github.com/sensepost/gowitness@latest
 RUN go install -v github.com/projectdiscovery/wappalyzergo/cmd/update-fingerprints@latest

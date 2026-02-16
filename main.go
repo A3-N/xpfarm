@@ -35,7 +35,7 @@ ____  ________________________
  ╱     ╲  │    │    │     ╲   ╱ __ ╲│  │ ╲╱  y y  ╲
 ╱___╱╲  ╲ │____│    ╲___  ╱  (____  ╱__│  │__│_│  ╱
       ╲_╱               ╲╱        ╲╱            ╲╱ 
-                                github.com/a3-n
+                                github.com/A3-N
                             ` + "\x1b[3m" + `bugs, bounties & b*tchz` + "\x1b[0m" + `
 `
 	utils.PrintGradient(banner)
