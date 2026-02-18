@@ -9,7 +9,9 @@ import (
 	wappalyzergo "github.com/projectdiscovery/wappalyzergo"
 )
 
-type Wappalyzer struct{}
+type Wappalyzer struct {
+	client *wappalyzergo.Wappalyze
+}
 
 func (w *Wappalyzer) Name() string {
 	return "wappalyzer"
@@ -34,15 +36,27 @@ func (w *Wappalyzer) Install() error {
 	return nil
 }
 
+// ensureClient lazily initializes the wappalyzer client once
+func (w *Wappalyzer) ensureClient() error {
+	if w.client != nil {
+		return nil
+	}
+	c, err := wappalyzergo.New()
+	if err != nil {
+		return err
+	}
+	w.client = c
+	return nil
+}
+
 // Analyze performs technology detection on response headers and body
 func (w *Wappalyzer) Analyze(headers map[string][]string, body []byte) []string {
-	wappalyzerClient, err := wappalyzergo.New()
-	if err != nil {
+	if err := w.ensureClient(); err != nil {
 		utils.LogError("Failed to initialize wappalyzer: %v", err)
 		return nil
 	}
 
-	fingerprints := wappalyzerClient.Fingerprint(headers, body)
+	fingerprints := w.client.Fingerprint(headers, body)
 
 	results := make([]string, 0, len(fingerprints))
 	for name := range fingerprints {

@@ -76,13 +76,13 @@ type WebAsset struct {
 
 type Vulnerability struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
-	TargetID    uint           `gorm:"index" json:"target_id"`
+	TargetID    uint           `gorm:"index;uniqueIndex:idx_vuln_unique" json:"target_id"`
 	Name        string         `json:"name"`
 	Severity    string         `gorm:"index:idx_vuln_severity" json:"severity"`
 	Description string         `json:"description"`
-	MatcherName string         `json:"matcher_name"`
+	MatcherName string         `gorm:"uniqueIndex:idx_vuln_unique" json:"matcher_name"`
 	Extracted   string         `json:"extracted_results"`
-	TemplateID  string         `gorm:"index:idx_vuln_template" json:"template_id"`
+	TemplateID  string         `gorm:"index:idx_vuln_template;uniqueIndex:idx_vuln_unique" json:"template_id"`
 	CreatedAt   time.Time      `json:"created_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 }

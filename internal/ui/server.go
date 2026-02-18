@@ -30,21 +30,9 @@ import (
 var f embed.FS
 
 func StartServer(port string) error {
-	// Check for debug mode code
-	isDebug := false
-	for _, arg := range os.Args {
-		if arg == "-debug" {
-			isDebug = true
-			break
-		}
-	}
-	if os.Getenv("DEBUG") != "" {
-		isDebug = true
-	}
-
-	if !isDebug {
-		gin.SetMode(gin.ReleaseMode)
-	}
+	// Debug mode is already set in main.go via flag.Parse() and gin.SetMode().
+	// Check if Gin is in debug mode to enable the logger middleware.
+	isDebug := gin.Mode() == gin.DebugMode
 
 	// Use gin.New() to skip Default Logger output
 	r := gin.New()
@@ -112,8 +100,6 @@ func StartServer(port string) error {
 	}
 	r.HTMLRender = render
 
-	r.HTMLRender = render
-
 	var discordToken, discordChannel string
 	var telegramToken, telegramChatID string
 	db := database.GetDB()
@@ -159,7 +145,7 @@ func StartServer(port string) error {
 	}
 
 	// Hook up callbacks (Broadcast)
-	manager.OnStart = func(target string) {
+	manager.SetOnStart(func(target string) {
 		if discordClient != nil {
 			discordClient.SendNotification("🚀 Scan Started", "Started scanning target: **"+target+"**", 0x34d399)
 		}
@@ -168,8 +154,8 @@ func StartServer(port string) error {
 				utils.LogError("Telegram notification failed: %v", err)
 			}
 		}
-	}
-	manager.OnStop = func(target string, cancelled bool) {
+	})
+	manager.SetOnStop(func(target string, cancelled bool) {
 		if discordClient != nil {
 			discordClient.SendNotification("🏁 Scan Ended", "Scanning finished or stopped for: **"+target+"**", 0x8b5cf6)
 		}
@@ -178,7 +164,7 @@ func StartServer(port string) error {
 				utils.LogError("Telegram notification failed: %v", err)
 			}
 		}
-	}
+	})
 
 	// --- Helper for Sidebar Data ---
 	getGlobalContext := func(data gin.H) gin.H {
@@ -197,12 +183,14 @@ func StartServer(port string) error {
 		var assetsCount int64
 		var targetsCount int64
 		var resultsCount int64
-		var recentResults []database.ScanResult
 
 		db := database.GetDB()
 		db.Model(&database.Asset{}).Count(&assetsCount)
 		db.Model(&database.Target{}).Count(&targetsCount)
 		db.Model(&database.ScanResult{}).Count(&resultsCount)
+
+		var recentResults []database.ScanResult
+		db.Order("created_at desc").Limit(10).Preload("Target").Find(&recentResults)
 
 		var portsCount int64
 		db.Model(&database.Port{}).Count(&portsCount)
@@ -699,13 +687,13 @@ func StartServer(port string) error {
 					}
 				}()
 
-				// Re-hook callbacks (idempotent assignment)
-				manager.OnStart = func(target string) {
+				// Re-hook callbacks (thread-safe)
+				manager.SetOnStart(func(target string) {
 					dc.SendNotification("🚀 Scan Started", "Started scanning target: **"+target+"**", 0x34d399)
-				}
-				manager.OnStop = func(target string, cancelled bool) {
+				})
+				manager.SetOnStop(func(target string, cancelled bool) {
 					dc.SendNotification("🏁 Scan Ended", "Scanning finished or stopped for: **"+target+"**", 0x8b5cf6)
-				}
+				})
 			}
 		}
 
@@ -877,11 +865,35 @@ func StartServer(port string) error {
 			cvesByProduct[prod] = cves
 		}
 
+		// Count only Nuclei findings with severity low or above (not info)
+		vulnCount := 0
+		vulnsBySeverity := make(map[string][]database.Vulnerability)
+		for _, v := range target.Vulns {
+			sev := v.Severity
+			vulnsBySeverity[sev] = append(vulnsBySeverity[sev], v)
+			if sev == "low" || sev == "medium" || sev == "high" || sev == "critical" {
+				vulnCount++
+			}
+		}
+
+		// Sort vulns within each severity by name
+		for sev := range vulnsBySeverity {
+			vulns := vulnsBySeverity[sev]
+			sort.Slice(vulns, func(i, j int) bool {
+				return vulns[i].Name < vulns[j].Name
+			})
+			vulnsBySeverity[sev] = vulns
+		}
+
 		c.HTML(http.StatusOK, "target_details.html", getGlobalContext(gin.H{
-			"Page":          "assets",
-			"Target":        target,
-			"CVEsByProduct": cvesByProduct,
+			"Page":            "assets",
+			"Target":          target,
+			"CVEsByProduct":   cvesByProduct,
+			"VulnCount":       vulnCount,
+			"VulnsBySeverity": vulnsBySeverity,
+			"SeverityOrder":   []string{"critical", "high", "medium", "low", "info"},
 		}))
+
 	})
 
 	// Scan Trigger
@@ -919,20 +931,19 @@ func StartServer(port string) error {
 	})
 
 	r.POST("/api/scan/stop", func(c *gin.Context) {
-		target := c.PostForm("target")
-		// If target is empty, it stops all?
-		// Current manager StopScan logic: empty string = stop all.
-		// Let's allow specific stop via JSON or Form.
-		if target == "" {
-			// Try JSON
+		var target string
+		// Determine content type to avoid consuming the body twice
+		if c.ContentType() == "application/json" {
 			var req struct {
 				Target string `json:"target"`
 			}
 			if err := c.ShouldBindJSON(&req); err == nil {
 				target = req.Target
 			}
+		} else {
+			target = c.PostForm("target")
 		}
-
+		// Empty target = stop all scans
 		core.GetManager().StopScan(target)
 		c.JSON(http.StatusOK, gin.H{"status": "stopped", "target": target})
 	})

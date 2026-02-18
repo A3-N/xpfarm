@@ -196,7 +196,7 @@ func ResolveAndCheck(input string) TargetCheckResult {
 	}
 
 	res.ResolvedIPs = ips
-	if res.IsAlive {
+	if res.IsAlive && !res.IsLocalhost {
 		res.Status = "up"
 	}
 	if len(ips) == 0 && parsed.Type != TargetTypeCIDR {

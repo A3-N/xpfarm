@@ -32,3 +32,4 @@ __pycache__/
 *.py[cod]
 screenshots/
 .screenshots/
+*.txt

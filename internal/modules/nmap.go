@@ -27,9 +27,9 @@ func (n *Nmap) Install() error {
 	return fmt.Errorf("nmap must be installed manually")
 }
 
+// Run satisfies the Module interface but is not the primary entry point; use CustomScan instead.
 func (n *Nmap) Run(ctx context.Context, target string) (string, error) {
-	// Standard full scan logic if needed, but we mostly use CustomScan
-	return "", nil
+	return "", fmt.Errorf("nmap: use CustomScan() for service enumeration; Run() is not implemented")
 }
 
 // NmapRun XML Structures
@@ -126,7 +126,11 @@ func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int) ([]Nm
 		// Again, separate XML to file? Or just reuse/overwrite? Overwrite is fine or new file.
 		// For fallback, we might not need "Raw Log" as much, but let's append it to rawOutput.
 
-		fbXmlFile, _ := os.CreateTemp("", "nmap-fb-*.xml")
+		fbXmlFile, fbTmpErr := os.CreateTemp("", "nmap-fb-*.xml")
+		if fbTmpErr != nil {
+			utils.LogError("Failed to create fallback temp xml file: %v", fbTmpErr)
+			return results, rawOutput, nil
+		}
 		fbXmlPath := fbXmlFile.Name()
 		fbXmlFile.Close()
 		defer os.Remove(fbXmlPath)
@@ -187,14 +191,10 @@ func (n *Nmap) parseNmapXML(xmlData []byte) ([]NmapResult, []int) {
 
 			// Clean up script output
 			var scriptOutputs []string
-			hasFingerprint := false
 			for _, s := range port.Scripts {
 				clean := strings.TrimSpace(s.Output)
 				if clean != "" {
 					scriptOutputs = append(scriptOutputs, fmt.Sprintf("[%s]\n%s", s.ID, clean))
-					if s.ID == "fingerprint-strings" {
-						hasFingerprint = true
-					}
 				}
 			}
 
@@ -208,13 +208,8 @@ func (n *Nmap) parseNmapXML(xmlData []byte) ([]NmapResult, []int) {
 			}
 			results = append(results, res)
 
-			// Fallback Criteria
-			// 1. tcpwrapped
-			// 2. Unrecognized service (usually "unknown") with fingerprints
-			if port.Service.Name == "tcpwrapped" || (port.Service.Name == "unknown" && hasFingerprint) {
-				fallbackPorts = append(fallbackPorts, port.PortID)
-			} else if port.Service.Name == "unknown" {
-				// Also fallback for just unknown?
+			// Fallback Criteria: tcpwrapped or unknown services get re-scanned with simpler args
+			if port.Service.Name == "tcpwrapped" || port.Service.Name == "unknown" {
 				fallbackPorts = append(fallbackPorts, port.PortID)
 			}
 		}

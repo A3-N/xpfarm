@@ -30,9 +30,9 @@ type ScanManager struct {
 	mu          sync.Mutex
 	activeScans map[string]ScanInfo
 
-	// Optional callbacks
-	OnStart func(target string)
-	OnStop  func(target string, cancelled bool)
+	// Optional callbacks — must hold mu or copy under mu before calling
+	onStart func(target string)
+	onStop  func(target string, cancelled bool)
 }
 
 var currentManager *ScanManager
@@ -62,6 +62,20 @@ func (sm *ScanManager) GetActiveScans() []ActiveScanData {
 	return list
 }
 
+// SetOnStart sets the callback for when a scan starts (thread-safe).
+func (sm *ScanManager) SetOnStart(fn func(target string)) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.onStart = fn
+}
+
+// SetOnStop sets the callback for when a scan stops (thread-safe).
+func (sm *ScanManager) SetOnStop(fn func(target string, cancelled bool)) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.onStop = fn
+}
+
 func (sm *ScanManager) StartScan(targetInput string, assetName string, excludeCF bool, excludeLocalhost bool) {
 	sm.mu.Lock()
 	if _, exists := sm.activeScans[targetInput]; exists {
@@ -76,10 +90,11 @@ func (sm *ScanManager) StartScan(targetInput string, assetName string, excludeCF
 		Cancel:    cancel,
 		AssetName: assetName,
 	}
+	onStartFn := sm.onStart
 	sm.mu.Unlock()
 
-	if sm.OnStart != nil {
-		sm.OnStart(targetInput)
+	if onStartFn != nil {
+		onStartFn(targetInput)
 	}
 
 	// Run in background
@@ -87,15 +102,12 @@ func (sm *ScanManager) StartScan(targetInput string, assetName string, excludeCF
 		defer func() {
 			sm.mu.Lock()
 			delete(sm.activeScans, targetInput)
+			onStopFn := sm.onStop
 			sm.mu.Unlock()
 
-			if sm.OnStop != nil {
+			if onStopFn != nil {
 				cancelled := ctx.Err() == context.Canceled
-				// Only notify here if NOT cancelled (Natural Finish).
-				// If cancelled, StopScan handled the notification immediately.
-				if !cancelled {
-					sm.OnStop(targetInput, false)
-				}
+				onStopFn(targetInput, cancelled)
 			}
 		}()
 		sm.runScanLogic(ctx, targetInput, assetName, excludeCF, excludeLocalhost)
@@ -107,23 +119,15 @@ func (sm *ScanManager) StopScan(target string) {
 	defer sm.mu.Unlock()
 
 	if target == "" {
-		// Stop ALL
+		// Stop ALL — cancel contexts, goroutine defers handle cleanup & notification
 		for t, info := range sm.activeScans {
 			info.Cancel()
-			delete(sm.activeScans, t)
-			if sm.OnStop != nil {
-				sm.OnStop(t, true)
-			}
 			utils.LogInfo("[Manager] Stopping scan for %s", t)
 		}
 	} else {
 		// Stop Specific
 		if info, ok := sm.activeScans[target]; ok {
 			info.Cancel()
-			delete(sm.activeScans, target)
-			if sm.OnStop != nil {
-				sm.OnStop(target, true)
-			}
 			utils.LogInfo("[Manager] Stopping scan for %s", target)
 		}
 	}
@@ -134,25 +138,13 @@ func (sm *ScanManager) StopAssetScan(assetName string) {
 	defer sm.mu.Unlock()
 
 	count := 0
-	var toStop []string
-
-	for t, info := range sm.activeScans {
+	for _, info := range sm.activeScans {
 		if info.AssetName == assetName {
-			toStop = append(toStop, t)
-		}
-	}
-
-	for _, t := range toStop {
-		if info, ok := sm.activeScans[t]; ok {
 			info.Cancel()
-			delete(sm.activeScans, t)
-			if sm.OnStop != nil {
-				sm.OnStop(t, true)
-			}
 			count++
 		}
 	}
-	utils.LogInfo("[Manager] Stopped %d scans for asset %s", count, assetName)
+	utils.LogInfo("[Manager] Requested stop for %d scans for asset %s", count, assetName)
 }
 
 // runScanLogic executes the sequential pipeline
@@ -758,6 +750,9 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 
 					// --- STAGE 7: CVE Lookup via Cvemap (Per-Worker/Per-Target) ---
 					sm.runCvemapScan(ctx, db, t)
+
+					// --- STAGE 8: Nuclei Vulnerability Scanning (Per-Port) ---
+					sm.runNucleiScan(ctx, db, t)
 				}
 			}()
 		}
@@ -778,14 +773,17 @@ func extractHeadersFromResponse(rawResponse string) map[string][]string {
 		return headers
 	}
 
+	// Normalize line endings: handle both \r\n and \n
+	normalized := strings.ReplaceAll(rawResponse, "\r\n", "\n")
+
 	// Response format: HTTP status line, then headers, then blank line, then body
-	parts := strings.SplitN(rawResponse, "\r\n\r\n", 2)
+	parts := strings.SplitN(normalized, "\n\n", 2)
 	if len(parts) == 0 {
 		return headers
 	}
 
 	headerSection := parts[0]
-	lines := strings.Split(headerSection, "\r\n")
+	lines := strings.Split(headerSection, "\n")
 	for i, line := range lines {
 		if i == 0 {
 			continue // Skip HTTP status line
@@ -915,7 +913,199 @@ func (sm *ScanManager) runCvemapScan(ctx context.Context, db *gorm.DB, targetObj
 	}
 }
 
+// runNucleiScan executes Nuclei per-port with service-aware template selection.
+func (sm *ScanManager) runNucleiScan(ctx context.Context, db *gorm.DB, targetObj database.Target) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	nucleiMod := modules.Get("nuclei")
+	nm, ok := nucleiMod.(*modules.Nuclei)
+	if !ok || !nm.CheckInstalled() {
+		utils.LogDebug("[Scanner] Nuclei not available, skipping vulnerability scan")
+		return
+	}
+
+	// Gather port and web asset data for this target
+	var ports []database.Port
+	db.Where("target_id = ?", targetObj.ID).Find(&ports)
+
+	var webAssets []database.WebAsset
+	db.Where("target_id = ?", targetObj.ID).Find(&webAssets)
+
+	if len(ports) == 0 && len(webAssets) == 0 {
+		utils.LogDebug("[Scanner] No ports or web assets for Nuclei scan on %s", targetObj.Value)
+		return
+	}
+
+	// Build the scan plan
+	plan := BuildNucleiPlan(targetObj.Value, ports, webAssets)
+	totalFindings := 0
+
+	// --- Per-Port Network Scans ---
+	for _, scan := range plan.NetworkScans {
+		if ctx.Err() != nil {
+			return
+		}
+
+		utils.LogInfo("[Scanner] [Nuclei] Scanning %s with tags: %v", scan.Target, scan.Tags)
+		output, err := nm.RunWithTags(ctx, scan.Target, scan.Tags, "tcp")
+		if output != "" {
+			recordResult(db, targetObj.ID, "nuclei", fmt.Sprintf("Network scan %s [tags: %s]\n%s", scan.Target, strings.Join(scan.Tags, ","), output))
+		}
+		if err != nil {
+			utils.LogDebug("[Scanner] [Nuclei] Network scan error for %s: %v", scan.Target, err)
+			// Don't skip — partial output may have findings
+		}
+
+		count := sm.parseAndStoreNucleiResults(db, targetObj.ID, output)
+		totalFindings += count
+	}
+
+	// --- Fallback: Automatic Scan for unmapped services ---
+	if len(plan.FallbackURLs) > 0 {
+		if ctx.Err() != nil {
+			return
+		}
+
+		tmpFile, err := os.CreateTemp("", "nuclei-fallback-*.txt")
+		if err != nil {
+			utils.LogError("[Scanner] [Nuclei] Failed to create temp file: %v", err)
+		} else {
+			for _, u := range plan.FallbackURLs {
+				fmt.Fprintln(tmpFile, u)
+			}
+			tmpFile.Close()
+			defer os.Remove(tmpFile.Name())
+
+			utils.LogInfo("[Scanner] [Nuclei] Running fallback auto-scan on %d unmapped ports for %s", len(plan.FallbackURLs), targetObj.Value)
+			output, err := nm.RunAutoScan(ctx, tmpFile.Name())
+			if output != "" {
+				recordResult(db, targetObj.ID, "nuclei", fmt.Sprintf("Fallback auto-scan (%d ports)\n%s", len(plan.FallbackURLs), output))
+			}
+			if err != nil {
+				utils.LogDebug("[Scanner] [Nuclei] Fallback scan error for %s: %v", targetObj.Value, err)
+			}
+
+			count := sm.parseAndStoreNucleiResults(db, targetObj.ID, output)
+			totalFindings += count
+		}
+	}
+
+	// --- Web Automatic Scan ---
+	if len(plan.WebURLs) > 0 {
+		if ctx.Err() != nil {
+			return
+		}
+
+		// Write URLs to temp file
+		tmpFile, err := os.CreateTemp("", "nuclei-web-urls-*.txt")
+		if err != nil {
+			utils.LogError("[Scanner] [Nuclei] Failed to create temp file: %v", err)
+		} else {
+			for _, u := range plan.WebURLs {
+				fmt.Fprintln(tmpFile, u)
+			}
+			tmpFile.Close()
+			defer os.Remove(tmpFile.Name())
+
+			utils.LogInfo("[Scanner] [Nuclei] Running automatic web scan on %d URLs for %s", len(plan.WebURLs), targetObj.Value)
+			output, err := nm.RunAutoScan(ctx, tmpFile.Name())
+			if output != "" {
+				recordResult(db, targetObj.ID, "nuclei", fmt.Sprintf("Web auto-scan (%d URLs)\n%s", len(plan.WebURLs), output))
+			}
+			if err != nil {
+				utils.LogDebug("[Scanner] [Nuclei] Web scan error for %s: %v", targetObj.Value, err)
+			}
+
+			count := sm.parseAndStoreNucleiResults(db, targetObj.ID, output)
+			totalFindings += count
+		}
+	}
+
+	// --- SSL Scans ---
+	for _, sslTarget := range plan.SSLTargets {
+		if ctx.Err() != nil {
+			return
+		}
+
+		utils.LogInfo("[Scanner] [Nuclei] Running SSL scan on %s", sslTarget)
+		output, err := nm.RunSSLScan(ctx, sslTarget)
+		if output != "" {
+			recordResult(db, targetObj.ID, "nuclei", fmt.Sprintf("SSL scan %s\n%s", sslTarget, output))
+		}
+		if err != nil {
+			utils.LogDebug("[Scanner] [Nuclei] SSL scan error for %s: %v", sslTarget, err)
+		}
+
+		count := sm.parseAndStoreNucleiResults(db, targetObj.ID, output)
+		totalFindings += count
+	}
+
+	if totalFindings > 0 {
+		utils.LogSuccess("[Scanner] [Nuclei] Found %d vulnerabilities for %s", totalFindings, targetObj.Value)
+	}
+}
+
+// parseAndStoreNucleiResults parses JSONL output from nuclei and stores findings as Vulnerability records.
+func (sm *ScanManager) parseAndStoreNucleiResults(db *gorm.DB, targetID uint, output string) int {
+	if output == "" {
+		return 0
+	}
+
+	count := 0
+	seen := make(map[string]bool) // Deduplicate by template-id + matched-at
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+
+		var result modules.NucleiResult
+		if err := json.Unmarshal([]byte(line), &result); err != nil {
+			continue
+		}
+
+		if result.TemplateID == "" {
+			continue
+		}
+
+		// Deduplicate
+		dedupeKey := result.TemplateID + "|" + result.MatchedAt
+		if seen[dedupeKey] {
+			continue
+		}
+		seen[dedupeKey] = true
+
+		// Build extracted results string
+		extracted := ""
+		if len(result.ExtractedResults) > 0 {
+			extracted = strings.Join(result.ExtractedResults, "\n")
+		}
+
+		db.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "target_id"}, {Name: "template_id"}, {Name: "matcher_name"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"name", "severity", "description", "extracted",
+			}),
+		}).Create(&database.Vulnerability{
+			TargetID:    targetID,
+			Name:        result.Info.Name,
+			Severity:    strings.ToLower(result.Info.Severity),
+			Description: result.Info.Description,
+			MatcherName: result.MatcherName,
+			Extracted:   extracted,
+			TemplateID:  result.TemplateID,
+		})
+		count++
+	}
+
+	return count
+}
+
 // recordResult saves raw tool output to the database with retry on failure
+
 func recordResult(db *gorm.DB, targetID uint, tool, output string) {
 	if output == "" {
 		return

@@ -139,7 +139,10 @@ func PrintGradient(text string) {
 			continue
 		}
 		// Interpolate color for this line
-		t := float64(i) / float64(len(lines)-1)
+		t := float64(0)
+		if len(lines) > 1 {
+			t = float64(i) / float64(len(lines)-1)
+		}
 		r := uint8(startR + t*(target.r-startR))
 		g := uint8(startG + t*(target.g-startG))
 		b := uint8(startB + t*(target.b-startB))

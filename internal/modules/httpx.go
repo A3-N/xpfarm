@@ -126,7 +126,7 @@ func (h *Httpx) RunRich(ctx context.Context, urls []string) ([]HttpxResult, erro
 	return results, nil
 }
 
-// Run is a simple wrapper for the Module interface
+// Run satisfies the Module interface but is not the primary entry point; use RunRich instead.
 func (h *Httpx) Run(ctx context.Context, target string) (string, error) {
-	return "", nil
+	return "", fmt.Errorf("httpx: use RunRich() for rich analysis; Run() is not implemented")
 }

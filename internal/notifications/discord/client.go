@@ -159,7 +159,7 @@ func (c *Client) messageCreate(s *discordgo.Session, m *discordgo.MessageCreate)
 
 			count := 0
 			for _, t := range asset.Targets {
-				go c.Scanner.StartScan(t.Value, asset.Name, true, true)
+				go c.Scanner.StartScan(t.Value, asset.Name, false, false)
 				count++
 			}
 			c.sendEmbed(s, m.ChannelID, "Bulk Scan Started", fmt.Sprintf("Triggered scans for **%d** targets in group **%s**.", count, asset.Name), 0x10b981, nil)
@@ -173,7 +173,7 @@ func (c *Client) messageCreate(s *discordgo.Session, m *discordgo.MessageCreate)
 			asset = args[2]
 		}
 		c.sendEmbed(s, m.ChannelID, "Scan Started", fmt.Sprintf("Target: **%s**\nAsset: %s", target, asset), 0x34d399, nil)
-		go c.Scanner.StartScan(target, asset, true, true)
+		go c.Scanner.StartScan(target, asset, false, false)
 
 	case "!stop":
 		if len(args) < 2 {
