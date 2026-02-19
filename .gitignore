@@ -1,8 +1,9 @@
 # Binaries
 xpfarm
 xpfarm.exe
-xpfarm.*
-*.exe
+xpfarm-mac-*
+xpfarm-linux-*
+xpfarm-windows-*
 *.dll
 *.so
 *.dylib
@@ -11,6 +12,8 @@ xpfarm.*
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 
 # Logs
 *.log
