@@ -8,6 +8,53 @@
     <link rel="icon" href="/favicon.ico">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        /* Immediate Sidebar State */
+        html.sidebar-collapsed .sidebar {
+            width: 80px;
+            padding: 20px 10px;
+        }
+
+        html.sidebar-collapsed .sidebar .full-text,
+        html.sidebar-collapsed .sidebar .sub-menu,
+        html.sidebar-collapsed .sidebar summary::after,
+        html.sidebar-collapsed .sidebar .logo svg {
+            display: none !important;
+        }
+
+        html.sidebar-collapsed .sidebar .short-text {
+            display: block;
+            text-align: center;
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+
+        html.sidebar-collapsed .sidebar .logo {
+            justify-content: center;
+            padding: 0;
+            margin-bottom: 20px;
+        }
+
+        html.sidebar-collapsed .sidebar .logo::after {
+            content: 'xp';
+            font-weight: 900;
+            font-size: 1.5rem;
+            color: var(--color-primary);
+            display: block;
+            filter: drop-shadow(0 0 5px rgba(139, 92, 246, 0.3));
+        }
+
+        html.sidebar-collapsed .sidebar .nav-link,
+        html.sidebar-collapsed .sidebar summary {
+            justify-content: center;
+            padding: 15px 0;
+            text-align: center;
+        }
+
+        html.sidebar-collapsed .sidebar .toggle-btn {
+            right: 25px;
+            transform: rotate(180deg);
+        }
+
         :root {
             --bg-body: #050505;
             --bg-sidebar: #0a0a0a;
@@ -87,69 +134,15 @@
             position: relative;
             z-index: 10;
             transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-
         }
 
-        .sidebar.collapsed {
-            width: 80px;
-            padding: 20px 10px;
+        /* Disable transition on load to prevent jump */
+        .sidebar.no-transition {
+            transition: none !important;
         }
 
-        /* Collapsed State Logic */
         .short-text {
             display: none;
-        }
-
-        .sidebar.collapsed .full-text {
-            display: none !important;
-        }
-
-        .sidebar.collapsed .short-text {
-            display: block;
-            font-size: 1.2rem;
-            font-weight: 700;
-            color: var(--color-text);
-            text-align: center;
-        }
-
-        .sidebar.collapsed .nav-link.active .short-text {
-            color: var(--color-primary);
-        }
-
-        .sidebar.collapsed .logo {
-            margin-bottom: 20px;
-            justify-content: center;
-            padding: 0;
-        }
-
-        .sidebar.collapsed .logo svg {
-            display: none;
-        }
-
-        /* Mini Logo for collapsed state */
-        .sidebar.collapsed .logo::after {
-            content: 'xp';
-            font-weight: 900;
-            font-size: 1.5rem;
-            color: var(--color-primary);
-            display: block;
-            filter: drop-shadow(0 0 5px rgba(139, 92, 246, 0.3));
-        }
-
-        .sidebar.collapsed .nav-link,
-        .sidebar.collapsed summary {
-            justify-content: center;
-            padding: 15px 0;
-            text-align: center;
-        }
-
-        /* Hide sub-menus and toggle icons when collapsed */
-        .sidebar.collapsed summary::after {
-            display: none;
-        }
-
-        .sidebar.collapsed .sub-menu {
-            display: none !important;
         }
 
         /* Toggle Button */
@@ -171,9 +164,9 @@
             transition: all 0.2s;
         }
 
-        .sidebar.collapsed .toggle-btn {
-            right: 25px;
-            transform: rotate(180deg);
+        .toggle-btn:hover {
+            color: var(--color-text);
+            background: var(--bg-hover);
         }
 
         .toggle-btn:hover {
@@ -283,7 +276,14 @@
             /* Allow nav links to scroll */
             padding-bottom: 60px;
             /* Space for toggle button */
-            scrollbar-width: thin;
+            scrollbar-width: none;
+            /* Firefox */
+            -ms-overflow-style: none;
+            /* IE and Edge */
+        }
+
+        .nav-links::-webkit-scrollbar {
+            display: none;
         }
 
         /* Dropdown Styles */
@@ -345,6 +345,7 @@
 
         .sub-link.active {
             color: var(--color-secondary);
+            font-weight: bold;
         }
 
         .nested-details {
@@ -536,6 +537,12 @@
             font-size: 0.9rem;
         }
     </style>
+    <script>
+        // Prevent FOUC / Jump
+        if (localStorage.getItem('sidebar-collapsed') === 'true') {
+            document.documentElement.classList.add('sidebar-collapsed');
+        }
+    </script>
 </head>
 
 <body>
@@ -604,7 +611,8 @@
                             <a href="/asset/{{.ID}}" class="sub-link"
                                 style="font-style: italic; font-weight: bold;">Overview</a>
                             {{range .Targets}}
-                            <a href="/target/{{.ID}}" class="sub-link">{{.Value}}</a>
+                            <a href="/target/{{.ID}}"
+                                class="sub-link {{if $.Target}}{{if eq .ID $.Target.ID}}active{{end}}{{end}}">{{.Value}}</a>
                             {{end}}
                         </div>
                     </details>
@@ -671,14 +679,14 @@
             });
 
             // Persist Sidebar Scroll
-            const sidebar = document.querySelector('.sidebar');
+            const sidebarNav = document.querySelector('.nav-links'); // Scroll is on .nav-links, not .sidebar
             const scrollKey = 'sidebar-scroll-pos';
             const savedScroll = localStorage.getItem(scrollKey);
             if (savedScroll) {
-                sidebar.scrollTop = parseInt(savedScroll, 10);
+                sidebarNav.scrollTop = parseInt(savedScroll, 10);
             }
-            sidebar.addEventListener('scroll', () => {
-                localStorage.setItem(scrollKey, sidebar.scrollTop);
+            sidebarNav.addEventListener('scroll', () => {
+                localStorage.setItem(scrollKey, sidebarNav.scrollTop);
             });
 
             // Highlight Active Link Logic (simple CSS check)
@@ -686,11 +694,11 @@
             // Auto-expand sidebar on summary click
             document.querySelectorAll('summary').forEach(s => {
                 s.addEventListener('click', (e) => {
-                    const sb = document.getElementById('sidebar');
-                    if (sb.classList.contains('collapsed')) {
-                        sb.classList.remove('collapsed');
+                    const html = document.documentElement;
+                    if (html.classList.contains('sidebar-collapsed')) {
+                        html.classList.remove('sidebar-collapsed');
                         localStorage.setItem('sidebar-collapsed', 'false');
-                        const btn = sb.querySelector('.toggle-btn');
+                        const btn = document.querySelector('.toggle-btn');
                         if (btn) btn.textContent = '«';
 
                         // Ensure it stays open or opens
@@ -701,23 +709,27 @@
                     }
                 });
             });
+
+            // Set Check for button creation
+            const sb = document.querySelector('.sidebar'); // Ensure sidebar exists
+            if (localStorage.getItem('sidebar-collapsed') === 'true') {
+                // arrow already handled by CSS rotate, just need text content if we used text
+                // But for rotate we use CSS transform now.
+                // let's just make sure text is correct if we rely on it
+                const btn = document.querySelector('.toggle-btn');
+                if (btn) btn.textContent = '»';
+            }
         });
 
         function toggleSidebar() {
-            const sb = document.getElementById('sidebar');
-            sb.classList.toggle('collapsed');
-            const isCollapsed = sb.classList.contains('collapsed');
+            const html = document.documentElement;
+            html.classList.toggle('sidebar-collapsed');
+            const isCollapsed = html.classList.contains('sidebar-collapsed');
             localStorage.setItem('sidebar-collapsed', isCollapsed);
 
             // Adjust toggle button arrow
-            const btn = sb.querySelector('.toggle-btn');
+            const btn = document.querySelector('.toggle-btn');
             btn.textContent = isCollapsed ? '»' : '«';
-        }
-
-        // Load sidebar state
-        if (localStorage.getItem('sidebar-collapsed') === 'true') {
-            document.getElementById('sidebar').classList.add('collapsed');
-            document.querySelector('.toggle-btn').textContent = '»';
         }
     </script>
 </body>
