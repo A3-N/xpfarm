@@ -4,6 +4,7 @@ xpfarm.exe
 xpfarm-mac-*
 xpfarm-linux-*
 xpfarm-windows-*
+xpfarm*
 *.dll
 *.so
 *.dylib
