@@ -403,7 +403,7 @@
         {{if $vulns}}
         <div
             style="border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 12px; padding: 0; background: rgba(255,255,255,0.02);">
-            <div onclick="toggleRow('vuln-sev-{{$sev}}')"
+            <div onclick="toggleBlock('vuln-sev-{{$sev}}')"
                 style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 14px;">
                 <div style="display: flex; align-items: center; gap: 12px;">
                     {{if eq $sev "critical"}}<span class="badge"
@@ -460,7 +460,7 @@
     <!-- Known Product CVEs from Cvemap -->
     {{if .CVEsByProduct}}
     <div class="card">
-        <div onclick="toggleRow('cve-products-section')"
+        <div onclick="toggleBlock('cve-products-section')"
             style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
             <h3 style="margin: 0;">Miscellaneous CVEs for Products</h3>
             <!-- Matched EXACTLY to web assets arrow button -->
@@ -472,7 +472,7 @@
             {{range $product, $cves := .CVEsByProduct}}
             <div
                 style="border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 12px; padding: 0; background: rgba(255,255,255,0.02);">
-                <div onclick="toggleRow('cve-product-{{$product}}')"
+                <div onclick="toggleBlock('cve-product-{{$product}}')"
                     style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 14px;">
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <h4 style="margin: 0; text-transform: capitalize;">{{$product}}</h4>
@@ -673,6 +673,15 @@
         var x = document.getElementById(id);
         if (x.style.display === "none") {
             x.style.display = "table-row";
+        } else {
+            x.style.display = "none";
+        }
+    }
+
+    function toggleBlock(id) {
+        var x = document.getElementById(id);
+        if (x.style.display === "none") {
+            x.style.display = "block";
         } else {
             x.style.display = "none";
         }
