@@ -18,6 +18,7 @@ type Asset struct {
 type Target struct {
 	ID           uint            `gorm:"primaryKey" json:"id"`
 	AssetID      uint            `gorm:"index" json:"asset_id"`
+	Asset        *Asset          `gorm:"foreignKey:AssetID" json:"asset,omitempty"`
 	ParentID     *uint           `gorm:"index" json:"parent_id"` // Pointer allows null for root targets
 	Parent       *Target         `gorm:"foreignKey:ParentID" json:"parent,omitempty"`
 	Subdomains   []Target        `gorm:"foreignKey:ParentID" json:"subdomains,omitempty"`
@@ -121,4 +122,13 @@ type Setting struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+type SavedSearch struct {
+	ID        uint           `gorm:"primaryKey" json:"id"`
+	Name      string         `gorm:"uniqueIndex" json:"name"` // User-defined name for the search
+	QueryData string         `json:"query_data"`              // JSON serialized query conditions
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
