@@ -1,0 +1,533 @@
+{{define "title"}}Global Search - XPFarm{{end}}
+
+{{define "content"}}
+<div class="search-header">
+    <h1>Global Search</h1>
+    <p class="subtitle">Construct dynamic queries across Assets, Targets, Ports, and Vulnerabilities.</p>
+</div>
+
+<div class="search-container">
+    <div class="saved-queries-panel card">
+        <h3>Saved Queries</h3>
+        <div class="saved-queries-list" id="savedQueriesList">
+            <!-- Will be populated via JS or template -->
+            {{if .SavedSearches}}
+            {{range .SavedSearches}}
+            <div class="saved-query-item">
+                <span class="sq-name" data-query="{{.QueryData}}" data-id="{{.ID}}"
+                    onclick="loadQuery(this)">{{.Name}}</span>
+                <button class="btn btn-danger btn-sm" data-id="{{.ID}}" onclick="deleteQuery(this)">X</button>
+            </div>
+            {{end}}
+            {{else}}
+            <p class="text-muted">No saved queries yet.</p>
+            {{end}}
+        </div>
+    </div>
+
+    <div class="query-builder-panel card">
+        <div class="qb-header">
+            <h3>Query Builder</h3>
+            <div class="qb-actions">
+                <button class="btn btn-primary" onclick="executeSearch()">Search</button>
+            </div>
+        </div>
+
+        <div class="rules-container" id="rulesContainer">
+            <!-- Dynamic rules added here -->
+        </div>
+
+        <div style="margin-bottom: 25px;">
+            <button class="btn btn-secondary" onclick="addRule()" style="width: 100%;">+ Add Rule</button>
+        </div>
+
+        <div class="save-query-section">
+            <input type="text" id="saveQueryName" placeholder="Query Name (e.g. Broken React Apps)">
+            <button class="btn btn-secondary" onclick="saveCurrentQuery()">Save Query</button>
+        </div>
+    </div>
+</div>
+
+<div class="results-container card" id="resultsContainer" style="display: none; margin-bottom: 25px;">
+    <div class="results-header">
+        <h3>Results <span id="resultsCount" class="badge badge-cf">0</span></h3>
+    </div>
+    <div class="table-responsive">
+        <table id="resultsTable">
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Value / Location</th>
+                    <th>Details</th>
+                    <th>Asset</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="resultsBody">
+                <!-- Results populated here -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="helper-text-container card">
+    <h4 style="margin-top: 0; margin-bottom: 15px; color: var(--color-primary);">Search Syntax Guide & Examples</h4>
+    <div class="text-muted" style="font-size: 0.95rem; line-height: 1.6; color: #a1a1aa;">
+        <p style="margin-top: 0; margin-bottom: 15px;">
+            Construct advanced queries by combining multiple rules using <strong>AND / OR</strong> logic. This search
+            engine seamlessly queries across Assets, Targets, Ports, Web Servers, and Vulnerabilities simultaneously.
+        </p>
+
+        <h5 style="color: var(--color-text); margin-bottom: 8px;">Matching Operators:</h5>
+        <ul style="margin-top: 0; margin-bottom: 20px; padding-left: 20px;">
+            <li style="margin-bottom: 6px;"><strong>Matches Pattern (*):</strong> Uses SQL wildcards. Use <code>*</code>
+                to match any characters. <i>(Highly efficient)</i></li>
+            <li style="margin-bottom: 6px;"><strong>Matches Regex:</strong> Uses native Go regular expressions for
+                precise filtering. <i>(Evaluated post-fetch)</i></li>
+            <li style="margin-bottom: 6px;"><strong>Equals / Contains:</strong> Standard exact or partial text matching.
+            </li>
+            <li style="margin-bottom: 6px;"><strong>Greater/Less Than:</strong> Useful for numeric fields like Ports or
+                Status Codes.</li>
+        </ul>
+
+        <h5 style="color: var(--color-text); margin-bottom: 10px;">Field Examples:</h5>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <div>
+                <strong style="color: var(--color-text);">Target Type</strong><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Equals: domain</code>
+            </div>
+            <div>
+                <strong style="color: var(--color-text);">Target Value (Domain/IP)</strong><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Matches Pattern: *.corp.local</code>
+            </div>
+            <div>
+                <strong style="color: var(--color-text);">Target Status</strong><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Equals: up</code>
+            </div>
+            <div>
+                <strong style="color: var(--color-text);">Tech Stack</strong><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Matches Pattern: *react*</code>
+            </div>
+            <div>
+                <strong style="color: var(--color-text);">Status Code</strong><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Equals: 200</code><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Greater Than (>): 399</code>
+            </div>
+            <div>
+                <strong style="color: var(--color-text);">URL/Path</strong><br>
+                <code
+                    style="color: #94a3b8; background: transparent; padding: 0;">Matches Regex: ^https?://.*\.js$</code><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Contains: /api/v1/</code>
+            </div>
+            <div>
+                <strong style="color: var(--color-text);">Page Title</strong><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Matches Pattern: *admin*</code>
+            </div>
+            <div>
+                <strong style="color: var(--color-text);">Port Number</strong><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Not Equals: 80</code>
+            </div>
+            <div>
+                <strong style="color: var(--color-text);">Port Service</strong><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Contains: ssh</code>
+            </div>
+            <div>
+                <strong style="color: var(--color-text);">Vuln Name</strong><br>
+                <code style="color: #94a3b8; background: transparent; padding: 0;">Contains: CVE-2024</code>
+            </div>
+            <div>
+                <strong style="color: var(--color-text);">Vuln Severity</strong><br>
+                <code
+                    style="color: #94a3b8; background: transparent; padding: 0;">Matches Regex: ^(critical|high)$</code>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .search-header {
+        margin-bottom: 20px;
+    }
+
+    .subtitle {
+        color: var(--color-muted);
+        margin-top: -15px;
+        font-size: 0.95rem;
+    }
+
+    .search-container {
+        display: grid;
+        grid-template-columns: 250px 1fr;
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+
+    .saved-queries-panel {
+        background-color: var(--bg-card);
+    }
+
+    .saved-queries-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 15px;
+    }
+
+    .saved-query-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px;
+        background-color: var(--bg-body);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        transition: border-color 0.2s;
+    }
+
+    .saved-query-item:hover {
+        border-color: var(--color-primary);
+    }
+
+    .sq-name {
+        cursor: pointer;
+        color: var(--color-text);
+        flex-grow: 1;
+        font-weight: 500;
+        font-size: 0.9rem;
+    }
+
+    .qb-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .qb-actions {
+        display: flex;
+        gap: 10px;
+    }
+
+    .rules-container {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        margin-bottom: 15px;
+    }
+
+    .rule-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        background-color: var(--bg-body);
+        padding: 15px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+    }
+
+    .rule-row select,
+    .rule-row input {
+        padding: 8px 12px;
+        background-color: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: white;
+    }
+
+    .rule-field {
+        width: 220px;
+    }
+
+    .rule-operator {
+        width: 180px;
+    }
+
+    .rule-value {
+        flex-grow: 1;
+        min-width: 250px;
+    }
+
+    .save-query-section {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .save-query-section input {
+        width: 300px;
+    }
+
+    .btn-danger {
+        background-color: rgba(239, 68, 68, 0.2);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .btn-danger:hover {
+        background-color: #ef4444;
+        color: white;
+    }
+
+    .btn-sm {
+        padding: 4px 8px;
+        font-size: 0.8rem;
+    }
+
+    .text-muted {
+        color: var(--color-muted);
+    }
+
+    .logical-op {
+        font-weight: bold;
+        color: var(--color-primary);
+        width: 80px;
+        text-align: center;
+    }
+</style>
+
+<script>
+    // Initial rule
+    document.addEventListener("DOMContentLoaded", () => {
+        if (document.querySelectorAll('.rule-row').length === 0) {
+            addRule();
+        }
+    });
+
+    const fields = [
+        { value: "target.type", label: "Target Type" },
+        { value: "target.value", label: "Target Value (Domain/IP)" },
+        { value: "target.status", label: "Target Status" },
+        { value: "web.tech_stack", label: "Tech Stack" },
+        { value: "web.status_code", label: "Status Code" },
+        { value: "web.url", label: "URL/Path" },
+        { value: "web.title", label: "Page Title" },
+        { value: "port.port", label: "Port Number" },
+        { value: "port.service", label: "Port Service" },
+        { value: "vuln.name", label: "Vuln Name" },
+        { value: "vuln.severity", label: "Vuln Severity" }
+    ];
+
+    const operators = [
+        { value: "contains", label: "Contains" },
+        { value: "equals", label: "Equals" },
+        { value: "not_equals", label: "Not Equals" },
+        { value: "regex", label: "Matches Regex" },
+        { value: "glob", label: "Matches Pattern (*)" },
+        { value: "gt", label: "Greater Than (>)" },
+        { value: "lt", label: "Less Than (<)" }
+    ];
+
+    function addRule(existingData = null) {
+        const container = document.getElementById('rulesContainer');
+        const isFirst = container.children.length === 0;
+
+        const row = document.createElement('div');
+        row.className = 'rule-row';
+
+        // Logical Operator (AND/OR)
+        if (!isFirst) {
+            const logicalOp = document.createElement('select');
+            logicalOp.className = 'logical-op';
+            logicalOp.innerHTML = '<option value="AND">AND</option><option value="OR">OR</option>';
+            if (existingData && existingData.logical) {
+                logicalOp.value = existingData.logical;
+            }
+            row.appendChild(logicalOp);
+        } else {
+            const spacer = document.createElement('div');
+            spacer.className = 'logical-op';
+            spacer.textContent = 'WHERE';
+            row.appendChild(spacer);
+        }
+
+        // Field Selector
+        const fieldSel = document.createElement('select');
+        fieldSel.className = 'rule-field';
+        fields.forEach(f => {
+            fieldSel.innerHTML += `<option value="${f.value}">${f.label}</option>`;
+        });
+        if (existingData) fieldSel.value = existingData.field;
+        row.appendChild(fieldSel);
+
+        // Operator Selector
+        const opSel = document.createElement('select');
+        opSel.className = 'rule-operator';
+        operators.forEach(o => {
+            opSel.innerHTML += `<option value="${o.value}">${o.label}</option>`;
+        });
+        if (existingData) opSel.value = existingData.operator;
+        row.appendChild(opSel);
+
+        // Value Input
+        const valInp = document.createElement('input');
+        valInp.className = 'rule-value';
+        valInp.type = 'text';
+        valInp.placeholder = 'Value...';
+        if (existingData) valInp.value = existingData.value;
+        row.appendChild(valInp);
+
+        // Delete button
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn btn-danger btn-sm';
+        delBtn.textContent = 'X';
+        delBtn.onclick = () => {
+            row.remove();
+            if (container.children.length > 0) {
+                // If first element became something else, change its logical op to "WHERE" if possible visually
+                const firstRow = container.children[0];
+                const firstOp = firstRow.querySelector('.logical-op');
+                if (firstOp.tagName === 'SELECT') {
+                    const newSpacer = document.createElement('div');
+                    newSpacer.className = 'logical-op';
+                    newSpacer.textContent = 'WHERE';
+                    firstRow.replaceChild(newSpacer, firstOp);
+                }
+            } else {
+                addRule(); // always keep one
+            }
+        };
+        row.appendChild(delBtn);
+
+        container.appendChild(row);
+    }
+
+    function buildQueryPayload() {
+        const rows = document.querySelectorAll('.rule-row');
+        const query = {
+            rules: []
+        };
+
+        rows.forEach((row, index) => {
+            const rule = {};
+            if (index > 0) {
+                rule.logical = row.querySelector('.logical-op').value;
+            }
+            rule.field = row.querySelector('.rule-field').value;
+            rule.operator = row.querySelector('.rule-operator').value;
+            rule.value = row.querySelector('.rule-value').value;
+            query.rules.push(rule);
+        });
+
+        return query;
+    }
+
+    async function executeSearch() {
+        const payload = buildQueryPayload();
+        const resultsContainer = document.getElementById('resultsContainer');
+        const tbody = document.getElementById('resultsBody');
+        const countSpan = document.getElementById('resultsCount');
+
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Searching...</td></tr>';
+        resultsContainer.style.display = 'block';
+
+        try {
+            const res = await fetch('/api/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) throw new Error("Search failed");
+
+            const data = await res.json();
+
+            countSpan.textContent = data.length || 0;
+            tbody.innerHTML = '';
+
+            if (!data || data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No results found.</td></tr>';
+                return;
+            }
+
+            data.forEach(item => {
+                const tr = document.createElement('tr');
+
+                // Construct Row HTML loosely based on what we returned
+                // Example structure item: { Type, Value, Details, AssetName, Link }
+                let actionLink = item.Link ? `<a href="${item.Link}" class="btn btn-secondary btn-sm">View</a>` : '';
+                tr.innerHTML = `
+                    <td><span class="badge badge-id">${item.Type}</span></td>
+                    <td style="word-break: break-all;">${item.Value}</td>
+                    <td>${item.Details}</td>
+                    <td>${item.AssetName}</td>
+                    <td>${actionLink}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="5" style="color: red; text-align: center;">Error: ${e.message}</td></tr>`;
+        }
+    }
+
+    async function saveCurrentQuery() {
+        const name = document.getElementById('saveQueryName').value.trim();
+        if (!name) {
+            alert('Please enter a name for the query.');
+            return;
+        }
+
+        const payload = buildQueryPayload();
+
+        try {
+            const res = await fetch('/api/search/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name, query_data: JSON.stringify(payload) })
+            });
+
+            if (res.ok) {
+                window.location.reload();
+            } else {
+                alert("Failed to save query");
+            }
+        } catch (e) {
+            alert("Error saving: " + e.message);
+        }
+    }
+
+    function loadQuery(el) {
+        try {
+            const rawJson = el.getAttribute('data-query');
+            const payload = JSON.parse(rawJson);
+            const container = document.getElementById('rulesContainer');
+            container.innerHTML = ''; // clear
+
+            if (payload && payload.rules) {
+                payload.rules.forEach(rule => {
+                    addRule(rule);
+                });
+            }
+        } catch (e) {
+            alert("Failed to parse saved query data.");
+        }
+    }
+
+    async function deleteQuery(el) {
+        if (!confirm("Delete this saved query?")) return;
+        try {
+            const id = el.getAttribute('data-id');
+            const formData = new FormData();
+            formData.append('id', id);
+
+            const res = await fetch('/api/search/delete', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (res.ok) {
+                window.location.reload();
+            } else {
+                alert("Failed to delete query");
+            }
+        } catch (e) {
+            alert("Error deleting: " + e.message);
+        }
+    }
+</script>
+{{end}}

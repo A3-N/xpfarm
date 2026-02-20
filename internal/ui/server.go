@@ -67,7 +67,7 @@ func StartServer(port string) error {
 		return err
 	}
 
-	pages := []string{"dashboard.html", "assets.html", "asset_details.html", "target_details.html", "modules.html", "settings.html", "target.html", "overlord.html"}
+	pages := []string{"dashboard.html", "assets.html", "asset_details.html", "target_details.html", "modules.html", "settings.html", "target.html", "overlord.html", "search.html"}
 
 	for _, page := range pages {
 		pageContent, err := f.ReadFile("templates/" + page)
@@ -360,6 +360,63 @@ func StartServer(port string) error {
 		c.HTML(http.StatusOK, "overlord.html", getGlobalContext(gin.H{
 			"Page": "overlord",
 		}))
+	})
+
+	// Global Search
+	r.GET("/search", func(c *gin.Context) {
+		var savedSearches []database.SavedSearch
+		database.GetDB().Find(&savedSearches)
+
+		c.HTML(http.StatusOK, "search.html", getGlobalContext(gin.H{
+			"Page":          "search",
+			"SavedSearches": savedSearches,
+		}))
+	})
+
+	r.POST("/api/search", func(c *gin.Context) {
+		var req core.SearchPayload
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		results, err := core.GlobalSearch(req)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, results)
+	})
+
+	r.POST("/api/search/save", func(c *gin.Context) {
+		var body struct {
+			Name      string `json:"name"`
+			QueryData string `json:"query_data"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		saved := database.SavedSearch{
+			Name:      body.Name,
+			QueryData: body.QueryData,
+		}
+
+		if err := database.GetDB().Create(&saved).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+
+	r.POST("/api/search/delete", func(c *gin.Context) {
+		id := c.PostForm("id")
+		if id != "" {
+			database.GetDB().Unscoped().Delete(&database.SavedSearch{}, id)
+		}
+		c.Status(http.StatusOK)
 	})
 
 	// Assets

@@ -44,9 +44,23 @@ func InitDB(debug bool) {
 	}
 
 	// Migrate the schema
-	err = DB.AutoMigrate(&Asset{}, &Target{}, &ScanResult{}, &Setting{}, &Port{}, &WebAsset{}, &Vulnerability{}, &CVE{})
+	err = DB.AutoMigrate(&Asset{}, &Target{}, &ScanResult{}, &Setting{}, &Port{}, &WebAsset{}, &Vulnerability{}, &CVE{}, &SavedSearch{})
 	if err != nil {
 		log.Fatal("failed to migrate database:", err)
+	}
+
+	// Seed default searches if none exist
+	var count int64
+	DB.Model(&SavedSearch{}).Count(&count)
+	if count == 0 {
+		defaultSearches := []SavedSearch{
+			{Name: "HELP: Explore Query Syntax (#description)", QueryData: `{"rules":[{"field":"target.type","operator":"equals","value":"domain"},{"logical":"AND","field":"target.value","operator":"glob","value":"*.corp.local"},{"logical":"AND","field":"target.status","operator":"equals","value":"up"},{"logical":"OR","field":"web.tech_stack","operator":"glob","value":"*mico-*_key*"},{"logical":"AND","field":"web.status_code","operator":"equals","value":"200"},{"logical":"AND","field":"web.url","operator":"regex","value":"^https?://.*\\.js$"},{"logical":"AND","field":"web.title","operator":"contains","value":"Dashboard"},{"logical":"OR","field":"port.port","operator":"not_equals","value":"80"},{"logical":"AND","field":"port.service","operator":"contains","value":"ssh"},{"logical":"OR","field":"vuln.name","operator":"contains","value":"CVE-2024"},{"logical":"AND","field":"vuln.severity","operator":"regex","value":"^(critical|high)$"}]}`},
+			{Name: "Critical / High Vulns", QueryData: `{"rules":[{"field":"vuln.severity","operator":"regex","value":"^(critical|high)$"}]}`},
+			{Name: "Exposed Admin Panels", QueryData: `{"rules":[{"field":"web.url","operator":"glob","value":"*admin*"},{"logical":"OR","field":"web.title","operator":"glob","value":"*login*"}]}`},
+			{Name: "Web Servers on Non-Standard Ports", QueryData: `{"rules":[{"field":"port.port","operator":"not_equals","value":"80"},{"logical":"AND","field":"port.port","operator":"not_equals","value":"443"},{"logical":"AND","field":"port.service","operator":"contains","value":"http"}]}`},
+			{Name: "React / Vue Applications", QueryData: `{"rules":[{"field":"web.tech_stack","operator":"glob","value":"*react*"},{"logical":"OR","field":"web.tech_stack","operator":"glob","value":"*vue*"}]}`},
+		}
+		DB.Create(&defaultSearches)
 	}
 }
 
