@@ -797,7 +797,10 @@ func StartServer(port string) error {
 
 	r.POST("/asset/:id/advanced/save", func(c *gin.Context) {
 		id := c.Param("id")
-		c.Request.ParseForm()
+		if err := c.Request.ParseForm(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
+			return
+		}
 
 		enableAdvanced := c.PostForm("enable_advanced") == "on"
 		selectedTemplates := c.Request.Form["templates[]"]
