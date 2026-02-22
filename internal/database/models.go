@@ -11,6 +11,8 @@ type Asset struct {
 	Name              string         `gorm:"uniqueIndex" json:"name"`
 	AdvancedMode      bool           `json:"advanced_mode"`
 	AdvancedTemplates string         `json:"advanced_templates"` // Comma-separated template IDs
+	ScanProfileID     *uint          `json:"scan_profile_id"`
+	ScanProfile       *ScanProfile   `gorm:"foreignKey:ScanProfileID" json:"scan_profile,omitempty"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
@@ -146,4 +148,35 @@ type NucleiTemplate struct {
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`
 	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+type ScanProfile struct {
+	ID                uint   `gorm:"primaryKey" json:"id"`
+	Name              string `json:"name"` // E.g., "Default"
+	ExcludeCloudflare bool   `json:"exclude_cloudflare" gorm:"default:true"`
+	ExcludeLocalhost  bool   `json:"exclude_localhost" gorm:"default:true"`
+
+	EnableSubfinder          bool `json:"enable_subfinder" gorm:"default:false"`
+	ScanDiscoveredSubdomains bool `json:"scan_discovered_subdomains" gorm:"default:false"`
+
+	EnablePortScan bool   `json:"enable_port_scan" gorm:"default:true"`
+	PortScanScope  string `json:"port_scan_scope" gorm:"default:'top100'"` // top100, top1000, all
+	PortScanSpeed  string `json:"port_scan_speed" gorm:"default:'fast'"`   // slow, standard, fast
+	PortScanMode   string `json:"port_scan_mode" gorm:"default:'service'"` // fast, service, stealth
+
+	EnableWebProbe      bool   `json:"enable_web_probe" gorm:"default:true"`
+	EnableWebWappalyzer bool   `json:"enable_web_wappalyzer" gorm:"default:true"`
+	EnableWebGowitness  bool   `json:"enable_web_gowitness" gorm:"default:true"`
+	EnableWebKatana     bool   `json:"enable_web_katana" gorm:"default:false"`
+	EnableWebUrlfinder  bool   `json:"enable_web_urlfinder" gorm:"default:false"`
+	WebScanScope        string `json:"web_scan_scope" gorm:"default:'common'"` // all, common, nmap_http
+	WebScanRateLimit    int    `json:"web_scan_rate_limit" gorm:"default:150"`
+
+	EnableVulnScan bool `json:"enable_vuln_scan" gorm:"default:false"`
+	EnableCvemap   bool `json:"enable_cvemap" gorm:"default:true"`
+	EnableNuclei   bool `json:"enable_nuclei" gorm:"default:false"`
+
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }

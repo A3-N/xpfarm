@@ -67,7 +67,7 @@ func StartServer(port string) error {
 		return err
 	}
 
-	pages := []string{"dashboard.html", "assets.html", "asset_details.html", "target_details.html", "modules.html", "settings.html", "target.html", "overlord.html", "search.html", "advanced_scan.html"}
+	pages := []string{"dashboard.html", "assets.html", "asset_details.html", "target_details.html", "modules.html", "settings.html", "target.html", "overlord.html", "search.html", "advanced_scan.html", "scan_settings.html"}
 
 	for _, page := range pages {
 		pageContent, err := f.ReadFile("templates/" + page)
@@ -437,7 +437,15 @@ func StartServer(port string) error {
 	r.POST("/assets/create", func(c *gin.Context) {
 		name := c.PostForm("name")
 		if name != "" {
-			database.GetDB().Create(&database.Asset{Name: name})
+			db := database.GetDB()
+			profile := database.ScanProfile{
+				Name: "Default " + name,
+			}
+			if err := db.Create(&profile).Error; err == nil {
+				db.Create(&database.Asset{Name: name, ScanProfileID: &profile.ID})
+			} else {
+				db.Create(&database.Asset{Name: name})
+			}
 		}
 		c.Redirect(http.StatusFound, "/assets")
 	})
@@ -473,8 +481,6 @@ func StartServer(port string) error {
 
 	r.POST("/asset/:id/scan", func(c *gin.Context) {
 		id := c.Param("id")
-		excludeCF := c.PostForm("exclude_cf") == "on"
-		excludeLocalhost := c.PostForm("exclude_localhost") == "on"
 
 		var asset database.Asset
 		if err := database.GetDB().Preload("Targets").First(&asset, id).Error; err == nil {
@@ -482,7 +488,7 @@ func StartServer(port string) error {
 			for _, t := range asset.Targets {
 				val := t.Value
 				// Run in goroutine to not block
-				go core.RunScan(val, asset.Name, excludeCF, excludeLocalhost)
+				go core.RunScan(val, asset.Name)
 			}
 		}
 		c.Redirect(http.StatusFound, "/asset/"+id)
@@ -663,7 +669,7 @@ func StartServer(port string) error {
 		db := database.GetDB()
 		var asset database.Asset
 		// Use Find to avoid GORM "record not found" error log
-		db.Preload("Targets").Find(&asset, id)
+		db.Preload("Targets").Preload("ScanProfile").Find(&asset, id)
 		if asset.ID == 0 {
 			c.Redirect(http.StatusFound, "/assets")
 			return
@@ -814,6 +820,94 @@ func StartServer(port string) error {
 		c.Redirect(http.StatusFound, "/asset/"+id)
 	})
 
+	r.GET("/asset/:id/settings", func(c *gin.Context) {
+		id := c.Param("id")
+		db := database.GetDB()
+		var asset database.Asset
+		db.Preload("ScanProfile").Find(&asset, id)
+		if asset.ID == 0 {
+			c.Redirect(http.StatusFound, "/assets")
+			return
+		}
+
+		if asset.ScanProfileID == nil || asset.ScanProfile == nil {
+			// Create default
+			profile := database.ScanProfile{Name: "Default " + asset.Name}
+			db.Create(&profile)
+			asset.ScanProfileID = &profile.ID
+			asset.ScanProfile = &profile
+			db.Save(&asset)
+		}
+
+		c.HTML(http.StatusOK, "scan_settings.html", getGlobalContext(gin.H{
+			"Page":  "assets",
+			"Asset": asset,
+		}))
+	})
+
+	r.POST("/asset/:id/settings/save", func(c *gin.Context) {
+		id := c.Param("id")
+		if err := c.Request.ParseForm(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form: " + err.Error()})
+			return
+		}
+
+		db := database.GetDB()
+		var asset database.Asset
+		db.Preload("ScanProfile").Find(&asset, id)
+		if asset.ID == 0 || asset.ScanProfile == nil {
+			c.Redirect(http.StatusFound, "/asset/"+id)
+			return
+		}
+
+		profile := asset.ScanProfile
+		profile.ExcludeCloudflare = c.PostForm("exclude_cloudflare") == "on"
+		profile.ExcludeLocalhost = c.PostForm("exclude_localhost") == "on"
+		profile.EnableSubfinder = c.PostForm("enable_subfinder") == "on"
+		profile.ScanDiscoveredSubdomains = c.PostForm("scan_discovered_subdomains") == "on"
+		profile.EnablePortScan = c.PostForm("enable_port_scan") == "on"
+
+		portScope := c.PostForm("port_scan_scope")
+		if portScope != "" {
+			profile.PortScanScope = portScope
+		}
+		portSpeed := c.PostForm("port_scan_speed")
+		if portSpeed != "" {
+			profile.PortScanSpeed = portSpeed
+		}
+		portMode := c.PostForm("port_scan_mode")
+		if portMode != "" {
+			profile.PortScanMode = portMode
+		}
+
+		profile.EnableWebProbe = c.PostForm("enable_web_probe") == "on"
+		profile.EnableWebWappalyzer = c.PostForm("enable_web_wappalyzer") == "on"
+		profile.EnableWebGowitness = c.PostForm("enable_web_gowitness") == "on"
+		profile.EnableWebKatana = c.PostForm("enable_web_katana") == "on"
+		profile.EnableWebUrlfinder = c.PostForm("enable_web_urlfinder") == "on"
+
+		webScope := c.PostForm("web_scan_scope")
+		if webScope != "" {
+			profile.WebScanScope = webScope
+		}
+
+		webRate := c.PostForm("web_scan_rate_limit")
+		if webRate != "" {
+			// Basic generic int parse instead of complex deps
+			var wr int
+			if _, err := fmt.Sscanf(webRate, "%d", &wr); err == nil && wr > 0 {
+				profile.WebScanRateLimit = wr
+			}
+		}
+
+		profile.EnableVulnScan = c.PostForm("enable_vuln_scan") == "on"
+		profile.EnableCvemap = c.PostForm("enable_cvemap") == "on"
+		profile.EnableNuclei = c.PostForm("enable_nuclei") == "on"
+
+		db.Save(profile)
+		c.Redirect(http.StatusFound, "/asset/"+id+"/settings")
+	})
+
 	// Modules
 	r.GET("/modules", func(c *gin.Context) {
 		allMods := modules.GetAll()
@@ -959,38 +1053,6 @@ func StartServer(port string) error {
 		c.Redirect(http.StatusFound, "/settings?tab=notifications")
 	})
 
-	r.POST("/settings/uncover", func(c *gin.Context) {
-		db := database.GetDB()
-		settings := map[string]string{
-			"SHODAN_API_KEY":     c.PostForm("shodan"),
-			"CENSYS_API_ID":      c.PostForm("censys_id"),
-			"CENSYS_API_SECRET":  c.PostForm("censys_secret"),
-			"FOFA_EMAIL":         c.PostForm("fofa_email"),
-			"FOFA_KEY":           c.PostForm("fofa_key"),
-			"QUAKE_TOKEN":        c.PostForm("quake"),
-			"HUNTER_API_KEY":     c.PostForm("hunter"),
-			"CRIMINALIP_API_KEY": c.PostForm("criminalip"),
-		}
-
-		for k, v := range settings {
-			var s database.Setting
-			s.Key = k
-			s.Value = v
-			s.Description = "Uncover Provider Key"
-			// Upsert to handle unique constraint + soft deletes
-			db.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "key"}},
-				DoUpdates: clause.AssignmentColumns([]string{"value", "description", "updated_at", "deleted_at"}),
-			}).Create(&s)
-			if v != "" {
-				os.Setenv(k, v)
-			} else {
-				os.Unsetenv(k)
-			}
-		}
-		c.Redirect(http.StatusFound, "/settings?tab=env")
-	})
-
 	r.POST("/settings/delete", func(c *gin.Context) {
 		key := c.PostForm("key")
 		if key != "" {
@@ -1129,11 +1191,9 @@ func StartServer(port string) error {
 	r.POST("/scan", func(c *gin.Context) {
 		target := c.PostForm("target")
 		asset := c.PostForm("asset")
-		excludeCF := c.PostForm("exclude_cf") == "on"
-		excludeLocalhost := c.PostForm("exclude_localhost") == "on"
 
 		if target != "" {
-			go core.RunScan(target, asset, excludeCF, excludeLocalhost)
+			go core.RunScan(target, asset)
 		}
 		c.Redirect(http.StatusFound, "/assets")
 	})
@@ -1149,7 +1209,7 @@ func StartServer(port string) error {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		go core.RunScan(req.Target, req.Asset, req.ExcludeCF, req.ExcludeLocalhost)
+		go core.RunScan(req.Target, req.Asset)
 		c.JSON(http.StatusOK, gin.H{"status": "started"})
 	})
 

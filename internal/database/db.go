@@ -44,7 +44,7 @@ func InitDB(debug bool) {
 	}
 
 	// Migrate the schema
-	err = DB.AutoMigrate(&Asset{}, &Target{}, &ScanResult{}, &Setting{}, &Port{}, &WebAsset{}, &Vulnerability{}, &CVE{}, &SavedSearch{}, &NucleiTemplate{})
+	err = DB.AutoMigrate(&Asset{}, &Target{}, &ScanResult{}, &Setting{}, &Port{}, &WebAsset{}, &Vulnerability{}, &CVE{}, &SavedSearch{}, &NucleiTemplate{}, &ScanProfile{})
 	if err != nil {
 		log.Fatal("failed to migrate database:", err)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"sort"
@@ -76,7 +75,7 @@ func (sm *ScanManager) SetOnStop(fn func(target string, cancelled bool)) {
 	sm.onStop = fn
 }
 
-func (sm *ScanManager) StartScan(targetInput string, assetName string, excludeCF bool, excludeLocalhost bool) {
+func (sm *ScanManager) StartScan(targetInput string, assetName string) {
 	sm.mu.Lock()
 	if _, exists := sm.activeScans[targetInput]; exists {
 		sm.mu.Unlock()
@@ -110,7 +109,7 @@ func (sm *ScanManager) StartScan(targetInput string, assetName string, excludeCF
 				onStopFn(targetInput, cancelled)
 			}
 		}()
-		sm.runScanLogic(ctx, targetInput, assetName, excludeCF, excludeLocalhost)
+		sm.runScanLogic(ctx, targetInput, assetName)
 	}()
 }
 
@@ -148,7 +147,7 @@ func (sm *ScanManager) StopAssetScan(assetName string) {
 }
 
 // runScanLogic executes the sequential pipeline
-func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, assetName string, excludeCF bool, excludeLocalhost bool) {
+func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, assetName string) {
 	// 1. Initialize & Context Check
 	db := database.GetDB()
 	if ctx.Err() != nil {
@@ -167,9 +166,28 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		assetName = "Default"
 	}
 	var asset database.Asset
-	if err := db.Where(database.Asset{Name: assetName}).FirstOrCreate(&asset).Error; err != nil {
+	if err := db.Preload("ScanProfile").Where(database.Asset{Name: assetName}).FirstOrCreate(&asset).Error; err != nil {
 		utils.LogError("[Scanner] Error getting asset: %v", err)
 	}
+
+	// Fallback to default profile if missing
+	if asset.ScanProfile == nil {
+		asset.ScanProfile = &database.ScanProfile{
+			ExcludeCloudflare:   true,
+			ExcludeLocalhost:    true,
+			EnablePortScan:      true,
+			PortScanScope:       "top100",
+			PortScanSpeed:       "fast",
+			PortScanMode:        "service",
+			EnableWebProbe:      true,
+			EnableWebWappalyzer: true,
+			EnableWebGowitness:  true,
+			WebScanScope:        "common",
+			WebScanRateLimit:    150,
+			EnableCvemap:        true,
+		}
+	}
+	profile := asset.ScanProfile
 
 	// 3. Create Main Target Record (before IsAlive check — always stored in DB)
 	targetObj := database.Target{
@@ -253,7 +271,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		db.Delete(&targetObj)
 		// Subdomains can still be alive even if the apex domain is dead,
 		// so we continue checking them individually below.
-	} else if mainCheck.IsLocalhost && excludeLocalhost {
+	} else if mainCheck.IsLocalhost && profile.ExcludeLocalhost {
 		// Alive but resolves to localhost and user chose to exclude
 		utils.LogWarning("[Scanner] Main target %s resolves to localhost (excluded), removing", hostname)
 		db.Model(&targetObj).Updates(map[string]interface{}{"status": "resolves to localhost", "is_alive": false})
@@ -272,7 +290,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		targetObj.Status = "up"
 
 		// Push main target if it passes filters
-		skip := (excludeCF && mainCheck.IsCloudflare)
+		skip := (profile.ExcludeCloudflare && mainCheck.IsCloudflare)
 		if !skip {
 			producerWG.Add(1)
 			go func() {
@@ -306,7 +324,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		}
 
 		// Alive but localhost — only exclude if user opted in
-		if check.IsLocalhost && excludeLocalhost {
+		if check.IsLocalhost && profile.ExcludeLocalhost {
 			utils.LogDebug("[Scanner] Subdomain %s resolves to localhost (excluded), removing", subTarget.Value)
 			db.Model(&subTarget).Updates(map[string]interface{}{"status": "resolves to localhost", "is_alive": false})
 			db.Delete(&subTarget)
@@ -322,7 +340,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		})
 
 		// Skip if Cloudflare-excluded
-		if excludeCF && check.IsCloudflare {
+		if profile.ExcludeCloudflare && check.IsCloudflare {
 			utils.LogDebug("[Scanner] Subdomain %s is behind Cloudflare, skipping scan", subTarget.Value)
 			continue
 		}
@@ -337,74 +355,6 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 			defer producerWG.Done()
 			targetsChan <- t
 		}(subTarget)
-	}
-
-	// === Uncover Producer (Parallel — ports only) ===
-	hasUncoverKeys := false
-	uncoverKeys := []string{"SHODAN_API_KEY", "CENSYS_API_ID", "CENSYS_API_SECRET", "FOFA_KEY", "QUAKE_TOKEN", "HUNTER_API_KEY", "CRIMINALIP_API_KEY"}
-	for _, k := range uncoverKeys {
-		if os.Getenv(k) != "" {
-			hasUncoverKeys = true
-			break
-		}
-	}
-
-	if hasUncoverKeys {
-		uncoverMod := modules.Get("uncover")
-		if uncoverMod != nil && uncoverMod.CheckInstalled() {
-			producerWG.Add(1)
-			go func() {
-				defer producerWG.Done()
-				output, err := uncoverMod.Run(ctx, hostname)
-				recordResult(db, targetObj.ID, "uncover", output)
-
-				if err == nil && output != "" {
-					lines := strings.Split(output, "\n")
-					count := 0
-					for _, line := range lines {
-						line = strings.TrimSpace(line)
-						if line == "" {
-							continue
-						}
-
-						// Parse host:port safely (handles IPv6)
-						host, portStr, splitErr := net.SplitHostPort(line)
-						if splitErr != nil {
-							// Might be just an IP/host without port
-							utils.LogDebug("[Scanner] Uncover line not host:port format: %s", line)
-							continue
-						}
-
-						portVal := utils.StringToInt(portStr)
-						if portVal <= 0 || portVal > 65535 {
-							utils.LogDebug("[Scanner] Uncover invalid port: %s", portStr)
-							continue
-						}
-
-						// Find the correct target to attribute the port to
-						portTargetID := targetObj.ID
-						if host != "" && host != hostname {
-							var matchTarget database.Target
-							if err := db.Where("value = ? AND asset_id = ?", host, asset.ID).First(&matchTarget).Error; err == nil {
-								portTargetID = matchTarget.ID
-							}
-						}
-
-						db.Clauses(clause.OnConflict{
-							Columns:   []clause.Column{{Name: "target_id"}, {Name: "port"}},
-							DoNothing: true,
-						}).Create(&database.Port{
-							TargetID: portTargetID,
-							Port:     portVal,
-							Protocol: "tcp",
-							Service:  "unknown",
-						})
-						count++
-					}
-					utils.LogSuccess("[Scanner] Uncover found %d results", count)
-				}
-			}()
-		}
 	}
 
 	// Channel Closer
@@ -433,7 +383,13 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 						continue
 					}
 
-					output, err := naabuMod.Run(ctx, t.Value)
+					var output string
+					var err error
+					if realNaabu, ok := naabuMod.(*modules.Naabu); ok {
+						output, err = realNaabu.CustomRun(ctx, t.Value, profile.PortScanScope, profile.PortScanSpeed)
+					} else {
+						output, err = naabuMod.Run(ctx, t.Value)
+					}
 					recordResult(db, t.ID, "naabu", output)
 
 					if err == nil && output != "" {
@@ -463,7 +419,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 							}
 							seenNaabuPorts[nResult.Port] = true
 
-							// Use OnConflict to handle race condition between Uncover and Naabu
+							// Use OnConflict to handle race condition cleanly
 							db.Clauses(clause.OnConflict{
 								Columns:   []clause.Column{{Name: "target_id"}, {Name: "port"}},
 								DoNothing: true,
@@ -487,7 +443,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 							if nmapMod, ok := nm.(*modules.Nmap); ok && nmapMod.CheckInstalled() {
 								var nmapErr error
 								var nmapRaw string
-								nResults, nmapRaw, nmapErr = nmapMod.CustomScan(ctx, t.Value, targetPorts)
+								nResults, nmapRaw, nmapErr = nmapMod.CustomScan(ctx, t.Value, targetPorts, profile.PortScanMode)
 
 								if nmapRaw != "" {
 									recordResult(db, t.ID, "nmap", nmapRaw)
