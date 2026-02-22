@@ -1,0 +1,370 @@
+{{define "title"}}Scan Settings - {{.Asset.Name}} - XPFarm{{end}}
+{{template "layout.html" .}}
+{{define "content"}}
+<div style="margin-bottom: 20px;">
+    <a href="/asset/{{.Asset.ID}}" style="color: var(--color-muted); text-decoration: none;">&larr; Back to Asset</a>
+</div>
+
+<div class="card" style="margin-bottom: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: start;">
+        <div>
+            <h1 style="margin-bottom: 5px;">Modular Scan Settings: {{.Asset.Name}}</h1>
+            <p style="color: var(--color-muted); font-size: 0.9rem; margin: 0;">Configure the pipeline stages, tool
+                selections, and scan speeds.</p>
+        </div>
+        <div style="text-align: right;">
+            <button type="submit" form="scan-settings-form" class="btn btn-primary"
+                style="padding: 5px 15px; font-size: 0.9rem;">Save Configuration</button>
+        </div>
+    </div>
+</div>
+
+<div class="tabs" style="margin-bottom: 20px; border-bottom: 1px solid var(--border-color);">
+    <button class="tab-btn active" onclick="showSettingsTab(event, 'tab-init')">1. Initialization</button>
+    <button class="tab-btn" onclick="showSettingsTab(event, 'tab-subdomains')">2. Subdomains</button>
+    <button class="tab-btn" onclick="showSettingsTab(event, 'tab-ports')">3. Port Scanning</button>
+    <button class="tab-btn" onclick="showSettingsTab(event, 'tab-web')">4. Web Tech</button>
+    <button class="tab-btn" onclick="showSettingsTab(event, 'tab-vuln')">5. Vulnerability</button>
+</div>
+
+<form id="scan-settings-form" action="/asset/{{.Asset.ID}}/settings/save" method="POST">
+    <!-- TAB 1: Initialization -->
+    <div id="tab-init" class="settings-tab-content" style="display: block;">
+        <div class="card">
+            <h3>Target Initialization</h3>
+            <p style="color: var(--color-muted); font-size: 0.9rem; margin-bottom: 20px;">Standard initialization always
+                runs. Normalizes targets and checks if they are alive.</p>
+
+            <div
+                style="display: flex; align-items: center; justify-content: space-between; max-width: 400px; margin-bottom: 15px;">
+                <span style="font-size: 0.95rem;">Exclude Cloudflare <span
+                        style="font-size: 0.8rem; color: var(--color-muted);">(Skip CDN IPs)</span></span>
+                <label class="switch">
+                    <input type="checkbox" name="exclude_cloudflare" {{if
+                        .Asset.ScanProfile.ExcludeCloudflare}}checked{{end}}>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div style="display: flex; align-items: center; justify-content: space-between; max-width: 400px;">
+                <span style="font-size: 0.95rem;">Exclude Localhost <span
+                        style="font-size: 0.8rem; color: var(--color-muted);">(Skip internal IPs)</span></span>
+                <label class="switch">
+                    <input type="checkbox" name="exclude_localhost" {{if
+                        .Asset.ScanProfile.ExcludeLocalhost}}checked{{end}}>
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 2: Subdomains -->
+    <div id="tab-subdomains" class="settings-tab-content" style="display: none;">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <div>
+                    <h3 style="margin: 0;">Subdomain Enumeration</h3>
+                    <p style="color: var(--color-muted); font-size: 0.9rem; margin: 0;">Find subdomains using Subfinder.
+                    </p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" name="enable_subfinder" id="chk-subfinder"
+                        onchange="toggleSubOptions('subfinder-opts', this.checked)" {{if
+                        .Asset.ScanProfile.EnableSubfinder}}checked{{end}}>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div id="subfinder-opts" {{if not
+                .Asset.ScanProfile.EnableSubfinder}}style="opacity: 0.5; pointer-events: none;" {{end}}>
+                <div style="display: flex; align-items: center; justify-content: space-between; max-width: 400px;">
+                    <span style="font-size: 0.95rem;">Scan Discovered Subdomains</span>
+                    <label class="switch">
+                        <input type="checkbox" name="scan_discovered_subdomains" {{if
+                            .Asset.ScanProfile.ScanDiscoveredSubdomains}}checked{{end}}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <p style="color: var(--color-muted); font-size: 0.8rem; margin-top: 5px;">If disabled, newly found
+                    subdomains are added to the database but excluded from the rest of THIS scan pipeline run.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 3: Ports -->
+    <div id="tab-ports" class="settings-tab-content" style="display: none;">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <div>
+                    <h3 style="margin: 0;">Port Scanning</h3>
+                    <p style="color: var(--color-muted); font-size: 0.9rem; margin: 0;">Discover open ports using Naabu
+                        & Nmap.</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" name="enable_port_scan" id="chk-ports"
+                        onchange="toggleSubOptions('port-opts', this.checked)" {{if
+                        .Asset.ScanProfile.EnablePortScan}}checked{{end}}>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div id="port-opts"
+                style="max-width: 500px; {{if not .Asset.ScanProfile.EnablePortScan}}opacity: 0.5; pointer-events: none;{{end}}">
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--color-muted);">Port Scope</label>
+                    <select name="port_scan_scope"
+                        style="width: 100%; padding: 8px; background: #050505; color: white; border: 1px solid var(--border-color); border-radius: 4px;">
+                        <option value="top100" {{if eq .Asset.ScanProfile.PortScanScope "top100" }}selected{{end}}>Top
+                            100 Ports</option>
+                        <option value="top1000" {{if eq .Asset.ScanProfile.PortScanScope "top1000" }}selected{{end}}>Top
+                            1000 Ports</option>
+                        <option value="all" {{if eq .Asset.ScanProfile.PortScanScope "all" }}selected{{end}}>All Ports
+                            (0-65535)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--color-muted);">Scan Speed</label>
+                    <select name="port_scan_speed"
+                        style="width: 100%; padding: 8px; background: #050505; color: white; border: 1px solid var(--border-color); border-radius: 4px;">
+                        <option value="slow" {{if eq .Asset.ScanProfile.PortScanSpeed "slow" }}selected{{end}}>Slow
+                            (Stealthier)</option>
+                        <option value="standard" {{if eq .Asset.ScanProfile.PortScanSpeed "standard" }}selected{{end}}>
+                            Standard</option>
+                        <option value="fast" {{if eq .Asset.ScanProfile.PortScanSpeed "fast" }}selected{{end}}>Fast
+                        </option>
+                    </select>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--color-muted);">Scan Mode</label>
+
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <label
+                            style="display: flex; align-items: center; gap: 10px; padding: 12px 15px; background: #050505; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; transition: border-color 0.2s;"
+                            onmouseover="this.style.borderColor='var(--color-primary)'"
+                            onmouseout="this.style.borderColor='var(--border-color)'">
+                            <input type="radio" name="port_scan_mode" value="fast"
+                                style="accent-color: var(--color-primary); width: 18px; height: 18px; margin: 0; cursor: pointer;"
+                                {{if eq .Asset.ScanProfile.PortScanMode "fast" }}checked{{end}}>
+                            <span style="font-size: 0.95rem;"><strong>Fast Scan</strong> <span
+                                    style="color: var(--color-muted); font-size: 0.85rem; margin-left: 5px;">(Naabu Only
+                                    - identifies open TCP ports)</span></span>
+                        </label>
+
+                        <label
+                            style="display: flex; align-items: center; gap: 10px; padding: 12px 15px; background: #050505; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; transition: border-color 0.2s;"
+                            onmouseover="this.style.borderColor='var(--color-primary)'"
+                            onmouseout="this.style.borderColor='var(--border-color)'">
+                            <input type="radio" name="port_scan_mode" value="service"
+                                style="accent-color: var(--color-primary); width: 18px; height: 18px; margin: 0; cursor: pointer;"
+                                {{if eq .Asset.ScanProfile.PortScanMode "service" }}checked{{end}}>
+                            <span style="font-size: 0.95rem;"><strong>Service Scan</strong> <span
+                                    style="color: var(--color-muted); font-size: 0.85rem; margin-left: 5px;">(Naabu +
+                                    Nmap -sV -sC - determines versions)</span></span>
+                        </label>
+
+                        <label
+                            style="display: flex; align-items: center; gap: 10px; padding: 12px 15px; background: #050505; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; transition: border-color 0.2s;"
+                            onmouseover="this.style.borderColor='var(--color-primary)'"
+                            onmouseout="this.style.borderColor='var(--border-color)'">
+                            <input type="radio" name="port_scan_mode" value="stealth"
+                                style="accent-color: var(--color-primary); width: 18px; height: 18px; margin: 0; cursor: pointer;"
+                                {{if eq .Asset.ScanProfile.PortScanMode "stealth" }}checked{{end}}>
+                            <span style="font-size: 0.95rem;"><strong>Stealth Scan</strong> <span
+                                    style="color: var(--color-muted); font-size: 0.85rem; margin-left: 5px;">(Nmap -sS -
+                                    SYN Stealth Scan)</span></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 4: Web Tech -->
+    <div id="tab-web" class="settings-tab-content" style="display: none;">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <div>
+                    <h3 style="margin: 0;">Web Technologies</h3>
+                    <p style="color: var(--color-muted); font-size: 0.9rem; margin: 0;">Probe HTTP components and detect
+                        tech stacks.</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" name="enable_web_probe" id="chk-web"
+                        onchange="toggleSubOptions('web-opts', this.checked)" {{if
+                        .Asset.ScanProfile.EnableWebProbe}}checked{{end}}>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div id="web-opts"
+                style="max-width: 500px; {{if not .Asset.ScanProfile.EnableWebProbe}}opacity: 0.5; pointer-events: none;{{end}}">
+                <h4>Web Scope</h4>
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <select name="web_scan_scope"
+                        style="width: 100%; padding: 8px; background: #050505; color: white; border: 1px solid var(--border-color); border-radius: 4px;">
+                        <option value="common" {{if eq .Asset.ScanProfile.WebScanScope "common" }}selected{{end}}>Common
+                            Web Ports (e.g. 80, 443, 8080)</option>
+                        <option value="nmap_http" {{if eq .Asset.ScanProfile.WebScanScope "nmap_http" }}selected{{end}}>
+                            Only ports Nmap flagged as HTTP/S</option>
+                        <option value="all" {{if eq .Asset.ScanProfile.WebScanScope "all" }}selected{{end}}>All Open
+                            Ports</option>
+                    </select>
+                </div>
+
+                <h4>Rate Limiting</h4>
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--color-muted);">Max Web Requests Per
+                        Second</label>
+                    <input type="number" name="web_scan_rate_limit" value="{{.Asset.ScanProfile.WebScanRateLimit}}"
+                        style="width: 100%; padding: 8px; background: #050505; color: white; border: 1px solid var(--border-color); border-radius: 4px;">
+                </div>
+
+                <h4>Modules</h4>
+                <div style="display: flex; flex-direction: column; gap: 15px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 0.95rem;">Wappalyzer (Tech Detection)</span>
+                        <label class="switch"><input type="checkbox" name="enable_web_wappalyzer" {{if
+                                .Asset.ScanProfile.EnableWebWappalyzer}}checked{{end}}><span
+                                class="slider"></span></label>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 0.95rem;">Gowitness (Screenshots)</span>
+                        <label class="switch"><input type="checkbox" name="enable_web_gowitness" {{if
+                                .Asset.ScanProfile.EnableWebGowitness}}checked{{end}}><span
+                                class="slider"></span></label>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 0.95rem;">Katana (Web Crawling)</span>
+                        <label class="switch"><input type="checkbox" name="enable_web_katana" {{if
+                                .Asset.ScanProfile.EnableWebKatana}}checked{{end}}><span class="slider"></span></label>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 0.95rem;">Urlfinder (Passive JS/URL Discovery)</span>
+                        <label class="switch"><input type="checkbox" name="enable_web_urlfinder" {{if
+                                .Asset.ScanProfile.EnableWebUrlfinder}}checked{{end}}><span
+                                class="slider"></span></label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 5: Vulnerability -->
+    <div id="tab-vuln" class="settings-tab-content" style="display: none;">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <div>
+                    <h3 style="margin: 0;">Vulnerability Scanning</h3>
+                    <p style="color: var(--color-muted); font-size: 0.9rem; margin: 0;">Lookup CVEs and run Nuclei
+                        templates.</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" name="enable_vuln_scan" id="chk-vuln"
+                        onchange="toggleSubOptions('vuln-opts', this.checked)" {{if
+                        .Asset.ScanProfile.EnableVulnScan}}checked{{end}}>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div id="vuln-opts"
+                style="max-width: 500px; {{if not .Asset.ScanProfile.EnableVulnScan}}opacity: 0.5; pointer-events: none;{{end}}">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                    <span style="font-size: 0.95rem;">Include Product CVE Lookup (CVEmap)</span>
+                    <label class="switch"><input type="checkbox" name="enable_cvemap" {{if
+                            .Asset.ScanProfile.EnableCvemap}}checked{{end}}><span class="slider"></span></label>
+                </div>
+
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                    <span style="font-size: 0.95rem;">Include Nuclei Automatic Scan (-as)</span>
+                    <label class="switch"><input type="checkbox" name="enable_nuclei" {{if
+                            .Asset.ScanProfile.EnableNuclei}}checked{{end}}><span class="slider"></span></label>
+                </div>
+                <p style="color: var(--color-muted); font-size: 0.8rem; margin: 0;">Note: Advanced custom Nuclei
+                    template selection is configured under the 'Advanced Templates' section of the Asset page.</p>
+            </div>
+        </div>
+    </div>
+</form>
+
+<style>
+    .tab-btn {
+        background: transparent;
+        border: none;
+        color: var(--color-muted);
+        padding: 10px 20px;
+        cursor: pointer;
+        font-size: 1rem;
+        border-bottom: 2px solid transparent;
+        transition: all 0.2s;
+    }
+
+    .tab-btn:hover {
+        color: white;
+    }
+
+    .tab-btn.active {
+        color: white;
+        border-bottom: 2px solid var(--color-primary);
+    }
+
+    .settings-tab-content {
+        animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(5px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+</style>
+
+<script>
+    function showSettingsTab(evt, tabName) {
+        var i, tabcontent, tablinks;
+        tabcontent = document.getElementsByClassName("settings-tab-content");
+        for (i = 0; i < tabcontent.length; i++) {
+            tabcontent[i].style.display = "none";
+        }
+        tablinks = document.getElementsByClassName("tab-btn");
+        for (i = 0; i < tablinks.length; i++) {
+            tablinks[i].className = tablinks[i].className.replace(" active", "");
+        }
+        document.getElementById(tabName).style.display = "block";
+        if (evt && evt.currentTarget) {
+            evt.currentTarget.className += " active";
+        } else {
+            let activeBtn = document.querySelector(`button[onclick*="${tabName}"]`);
+            if (activeBtn) activeBtn.className += " active";
+        }
+
+        // Save state individually for this asset
+        localStorage.setItem('scan_settings_tab_{{.Asset.ID}}', tabName);
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+        const savedTab = localStorage.getItem('scan_settings_tab_{{.Asset.ID}}');
+        if (savedTab && document.getElementById(savedTab)) {
+            showSettingsTab(null, savedTab);
+        }
+    });
+
+    function toggleSubOptions(id, isChecked) {
+        const div = document.getElementById(id);
+        if (isChecked) {
+            div.style.opacity = '1';
+            div.style.pointerEvents = 'auto';
+        } else {
+            div.style.opacity = '0.5';
+            div.style.pointerEvents = 'none';
+        }
+    }
+</script>
+{{end}}

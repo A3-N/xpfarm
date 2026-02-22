@@ -29,7 +29,7 @@ func RunUpdates() {
 
 	pdTools := []string{
 		"subfinder", "naabu", "httpx", "katana",
-		"uncover", "urlfinder", "nuclei", "vulnx", // cvemap is vulnx
+		"urlfinder", "nuclei", "vulnx", // cvemap is vulnx
 	}
 
 	// Maybe run in parallel? But sequential is safer for output order.

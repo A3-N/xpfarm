@@ -55,8 +55,11 @@
         <details class="card" style="margin-bottom: 10px; background: var(--bg-hover); cursor: pointer;" {{if eq
             .Name "Generic" }}open{{end}}>
             <summary
-                style="padding: 10px; font-weight: bold; border-bottom: 1px solid var(--border-color); color: var(--color-muted); outline: none;">
-                {{.Name}}
+                style="padding: 10px; font-weight: bold; border-bottom: 1px solid var(--border-color); color: var(--color-muted); outline: none; display: flex; justify-content: space-between; align-items: center;">
+                <span>{{.Name}}</span>
+                <button type="button" class="btn btn-secondary select-all-sub-btn"
+                    onclick="toggleSelectAllSub(this, event)" style="padding: 2px 8px; font-size: 0.75rem;"
+                    disabled>Toggle All</button>
             </summary>
             <table class="table" style="width: 100%; cursor: default;">
                 <tbody>
@@ -184,7 +187,7 @@
     function toggleFormState() {
         const isEnabled = document.getElementById('enable-advanced-scan').checked;
         const checkboxes = document.querySelectorAll('.template-checkbox');
-        const selectAllBtns = document.querySelectorAll('.select-all-btn');
+        const selectAllBtns = document.querySelectorAll('.select-all-btn, .select-all-sub-btn');
         const startScanBtn = document.getElementById('start-scan-btn');
         const templatesContainer = document.getElementById('templates-container');
 
@@ -200,6 +203,24 @@
 
     function toggleSelectAll(folder) {
         const checkboxes = document.querySelectorAll(`.folder-${folder}`);
+        let allChecked = true;
+
+        checkboxes.forEach(cb => {
+            if (!cb.checked) allChecked = false;
+        });
+
+        checkboxes.forEach(cb => {
+            cb.checked = !allChecked;
+        });
+    }
+
+    function toggleSelectAllSub(btn, event) {
+        event.stopPropagation();
+        event.preventDefault();
+        const details = btn.closest('details');
+        if (!details) return;
+
+        const checkboxes = details.querySelectorAll('.template-checkbox');
         let allChecked = true;
 
         checkboxes.forEach(cb => {

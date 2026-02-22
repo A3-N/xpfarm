@@ -26,7 +26,6 @@ func InitModules() {
 	Register(&Httpx{})
 	Register(&Gowitness{})
 	Register(&Katana{})
-	Register(&Uncover{})
 	Register(&Cvemap{})
 	Register(&Urlfinder{})
 	Register(&Wappalyzer{})

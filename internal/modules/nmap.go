@@ -69,8 +69,8 @@ type NmapResult struct {
 	Scripts  string
 }
 
-// CustomScan runs the Aggressive Scan -> Fallback Scan logic
-func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int) ([]NmapResult, string, error) {
+// CustomScan runs the Aggressive Scan -> Fallback Scan logic or Stealth logic
+func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int, mode string) ([]NmapResult, string, error) {
 	if len(ports) == 0 {
 		return nil, "", nil
 	}
@@ -81,7 +81,6 @@ func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int) ([]Nm
 	}
 	portList := strings.Join(portStrs, ",")
 
-	utils.LogInfo("Running nmap service scan on %s (Ports: %s)...", target, portList)
 	path := utils.ResolveBinaryPath("nmap")
 
 	// Create Temp File for XML
@@ -93,9 +92,15 @@ func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int) ([]Nm
 	xmlFile.Close()
 	defer os.Remove(xmlPath)
 
-	// 1. Aggressive Scan
-	// Output XML to file, Normal output to stdout (captured)
-	args := []string{"-Pn", "-sV", "-sC", "-p", portList, "-oX", xmlPath, target}
+	// 1. Scan Phase
+	var args []string
+	if mode == "stealth" {
+		utils.LogInfo("Running nmap stealth scan on %s (Ports: %s)...", target, portList)
+		args = []string{"-Pn", "-sS", "-p", portList, "-oX", xmlPath, target}
+	} else {
+		utils.LogInfo("Running nmap service scan on %s (Ports: %s)...", target, portList)
+		args = []string{"-Pn", "-sV", "-sC", "-p", portList, "-oX", xmlPath, target}
+	}
 
 	cmd := exec.CommandContext(ctx, path, args...)
 	outputBytes, err := cmd.CombinedOutput() // This captures normal output now

@@ -30,11 +30,11 @@ docker run -p 8888:8888 -v $(pwd)/data:/app/data -v $(pwd)/screenshots:/app/scre
 
 - [x] Redefine scan
 - [x] Vuln scan change
-- [ ] Vuln scan refine
-- [ ] Vuln scan choose/Scan Settings
+- [ ] Vuln scan advanced
+- [x] Vuln scan choose/Scan Settings
 - [x] Global Search
 - [ ] Global Search refine
-- [ ] Save State tabs
+- [x] Save State tabs
 - [ ] System Settings
 - [ ] SecretFinder JS
 - [ ] Repo detect/scan
