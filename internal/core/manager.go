@@ -206,7 +206,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 	var subdomains []string
 
 	subfinderMod := modules.Get("subfinder")
-	if subfinderMod != nil && subfinderMod.CheckInstalled() {
+	if profile.EnableSubfinder && subfinderMod != nil && subfinderMod.CheckInstalled() {
 		output, err := subfinderMod.Run(ctx, hostname)
 		recordResult(db, targetObj.ID, "subfinder", output)
 
@@ -229,29 +229,64 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		return
 	}
 
-	// === STAGE 2: Create subdomain records, then check IsAlive on all ===
-	utils.LogInfo("[Scanner] Stage 2: Creating %d subdomain records and running IsAlive checks", len(subdomains))
+	// === STAGE 2: Filter and Save newly found subdomains ===
+	utils.LogInfo("[Scanner] Stage 2: Filtering and saving %d newly discovered subdomains", len(subdomains))
 
-	// First, create all subdomain records in DB (no alive check yet)
-	var allSubTargets []database.Target
+	// First, check all newly-found subdomains and only save valid ones
 	for _, domain := range subdomains {
-		subTarget := database.Target{
-			AssetID:  asset.ID,
-			ParentID: &targetObj.ID,
-			Value:    domain,
-			Type:     "domain",
+		if ctx.Err() != nil {
+			break
 		}
+
+		check := ResolveAndCheck(domain)
+
+		subTarget := database.Target{
+			AssetID:      asset.ID,
+			ParentID:     &targetObj.ID,
+			Value:        domain,
+			Type:         "domain",
+			IsAlive:      check.IsAlive,
+			IsCloudflare: check.IsCloudflare,
+			IsLocalhost:  check.IsLocalhost,
+			Status:       "up",
+		}
+
+		if !check.IsAlive {
+			utils.LogDebug("[Scanner] Subdomain %s is unreachable, saving as dead", domain)
+			subTarget.IsAlive = false
+			subTarget.Status = "unreachable"
+		} else if check.IsLocalhost && profile.ExcludeLocalhost {
+			utils.LogDebug("[Scanner] Subdomain %s resolves to localhost (excluded), saving as dead", domain)
+			subTarget.IsAlive = false
+			subTarget.Status = "resolves to localhost"
+		} else if check.IsCloudflare && profile.ExcludeCloudflare {
+			utils.LogDebug("[Scanner] Subdomain %s is behind Cloudflare (excluded), saving as dead", domain)
+			subTarget.IsAlive = false
+			subTarget.Status = "Cloudflare"
+		}
+
 		if err := db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "value"}},
-			DoNothing: true,
+			DoUpdates: clause.AssignmentColumns([]string{"is_alive", "is_cloudflare", "is_localhost", "status", "updated_at"}),
 		}).Where(database.Target{Value: domain, AssetID: asset.ID}).FirstOrCreate(&subTarget).Error; err != nil {
 			utils.LogDebug("[Scanner] Error creating subtarget %s: %v", domain, err)
 			continue
 		}
-		allSubTargets = append(allSubTargets, subTarget)
+
+		if !subTarget.IsAlive {
+			db.Delete(&subTarget)
+		}
 	}
 
-	// Now check IsAlive on the main target + all subdomains
+	var allSubTargets []database.Target
+	if profile.ScanDiscoveredSubdomains {
+		// Load all existing subdomains for this asset from the database to scan them
+		db.Where("asset_id = ? AND id != ? AND type = ?", asset.ID, targetObj.ID, "domain").Find(&allSubTargets)
+		utils.LogInfo("[Scanner] Will scan %d previously discovered subdomains", len(allSubTargets))
+	} else {
+		utils.LogInfo("[Scanner] ScanDiscoveredSubdomains is off. Newly discovered subdomains were saved but will not be scanned this run.")
+	}
+
 	// Channel for alive targets to be scanned
 	targetsChan := make(chan database.Target, 100)
 	var producerWG sync.WaitGroup
@@ -259,25 +294,24 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 	// Check main target alive status
 	mainCheck := ResolveAndCheck(hostname)
 
-	// Tag localhost in DB regardless of excludeLocalhost setting
+	// Tag localhost in DB
 	if mainCheck.IsLocalhost {
 		db.Model(&targetObj).Update("is_localhost", true)
 	}
 
 	if !mainCheck.IsAlive {
-		// Truly unreachable — soft-delete
-		utils.LogWarning("[Scanner] Main target %s is unreachable (%s), removing", hostname, mainCheck.Status)
+		utils.LogWarning("[Scanner] Main target %s is unreachable (%s), soft-deleting", hostname, mainCheck.Status)
 		db.Model(&targetObj).Updates(map[string]interface{}{"status": mainCheck.Status, "is_alive": false})
 		db.Delete(&targetObj)
-		// Subdomains can still be alive even if the apex domain is dead,
-		// so we continue checking them individually below.
 	} else if mainCheck.IsLocalhost && profile.ExcludeLocalhost {
-		// Alive but resolves to localhost and user chose to exclude
-		utils.LogWarning("[Scanner] Main target %s resolves to localhost (excluded), removing", hostname)
+		utils.LogWarning("[Scanner] Main target %s resolves to localhost (excluded), soft-deleting", hostname)
 		db.Model(&targetObj).Updates(map[string]interface{}{"status": "resolves to localhost", "is_alive": false})
 		db.Delete(&targetObj)
+	} else if mainCheck.IsCloudflare && profile.ExcludeCloudflare {
+		utils.LogWarning("[Scanner] Main target %s is behind Cloudflare (excluded), soft-deleting", hostname)
+		db.Model(&targetObj).Updates(map[string]interface{}{"status": "Cloudflare", "is_alive": false})
+		db.Delete(&targetObj)
 	} else {
-		// Main target is alive (and either not localhost, or localhost is allowed)
 		db.Model(&targetObj).Updates(map[string]interface{}{
 			"is_cloudflare": mainCheck.IsCloudflare,
 			"is_localhost":  mainCheck.IsLocalhost,
@@ -289,20 +323,14 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		targetObj.IsAlive = true
 		targetObj.Status = "up"
 
-		// Push main target if it passes filters
-		skip := (profile.ExcludeCloudflare && mainCheck.IsCloudflare)
-		if !skip {
-			producerWG.Add(1)
-			go func() {
-				defer producerWG.Done()
-				targetsChan <- targetObj
-			}()
-		} else {
-			utils.LogWarning("[Scanner] Skipping main target %s (Cloudflare)", hostname)
-		}
+		producerWG.Add(1)
+		go func() {
+			defer producerWG.Done()
+			targetsChan <- targetObj
+		}()
 	}
 
-	// Check all subdomains
+	// Re-verify all subdomains we are about to scan
 	for _, subTarget := range allSubTargets {
 		if ctx.Err() != nil {
 			break
@@ -310,40 +338,33 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 
 		check := ResolveAndCheck(subTarget.Value)
 
-		// Tag localhost in DB regardless of excludeLocalhost setting
-		if check.IsLocalhost {
-			db.Model(&subTarget).Update("is_localhost", true)
-		}
-
-		// Truly unreachable → soft-delete
 		if !check.IsAlive {
-			utils.LogDebug("[Scanner] Subdomain %s is unreachable (%s), removing", subTarget.Value, check.Status)
+			utils.LogDebug("[Scanner] Subdomain %s is unreachable (%s), soft-deleting", subTarget.Value, check.Status)
 			db.Model(&subTarget).Updates(map[string]interface{}{"status": check.Status, "is_alive": false})
 			db.Delete(&subTarget)
 			continue
 		}
 
-		// Alive but localhost — only exclude if user opted in
 		if check.IsLocalhost && profile.ExcludeLocalhost {
-			utils.LogDebug("[Scanner] Subdomain %s resolves to localhost (excluded), removing", subTarget.Value)
+			utils.LogDebug("[Scanner] Subdomain %s resolves to localhost (excluded), soft-deleting", subTarget.Value)
 			db.Model(&subTarget).Updates(map[string]interface{}{"status": "resolves to localhost", "is_alive": false})
 			db.Delete(&subTarget)
 			continue
 		}
 
-		// Update alive status in DB
+		if profile.ExcludeCloudflare && check.IsCloudflare {
+			utils.LogDebug("[Scanner] Subdomain %s is behind Cloudflare (excluded), soft-deleting", subTarget.Value)
+			db.Model(&subTarget).Updates(map[string]interface{}{"status": "Cloudflare", "is_alive": false})
+			db.Delete(&subTarget)
+			continue
+		}
+
 		db.Model(&subTarget).Updates(map[string]interface{}{
 			"is_cloudflare": check.IsCloudflare,
 			"is_localhost":  check.IsLocalhost,
 			"is_alive":      true,
 			"status":        "up",
 		})
-
-		// Skip if Cloudflare-excluded
-		if profile.ExcludeCloudflare && check.IsCloudflare {
-			utils.LogDebug("[Scanner] Subdomain %s is behind Cloudflare, skipping scan", subTarget.Value)
-			continue
-		}
 
 		subTarget.IsAlive = true
 		subTarget.IsCloudflare = check.IsCloudflare
@@ -385,12 +406,14 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 
 					var output string
 					var err error
-					if realNaabu, ok := naabuMod.(*modules.Naabu); ok {
-						output, err = realNaabu.CustomRun(ctx, t.Value, profile.PortScanScope, profile.PortScanSpeed)
-					} else {
-						output, err = naabuMod.Run(ctx, t.Value)
+					if profile.EnablePortScan {
+						if realNaabu, ok := naabuMod.(*modules.Naabu); ok {
+							output, err = realNaabu.CustomRun(ctx, t.Value, profile.PortScanScope, profile.PortScanSpeed)
+						} else {
+							output, err = naabuMod.Run(ctx, t.Value)
+						}
+						recordResult(db, t.ID, "naabu", output)
 					}
-					recordResult(db, t.ID, "naabu", output)
 
 					if err == nil && output != "" {
 						lines := strings.Split(output, "\n")
@@ -474,229 +497,246 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 							}
 
 							var httpUrls []string
-							seenPorts := make(map[int]bool)
+							if profile.EnableWebProbe {
+								seenPorts := make(map[int]bool)
 
-							addPort := func(port int) {
-								if seenPorts[port] {
-									return
-								}
-								seenPorts[port] = true
-								proto := "http"
-								// Use Nmap service detection if available
-								if svc, ok := nmapServiceMap[port]; ok {
-									if strings.Contains(svc, "ssl") || strings.Contains(svc, "https") {
+								addPort := func(port int) {
+									if seenPorts[port] {
+										return
+									}
+									seenPorts[port] = true
+									proto := "http"
+									// Use Nmap service detection if available
+									if svc, ok := nmapServiceMap[port]; ok {
+										if strings.Contains(svc, "ssl") || strings.Contains(svc, "https") {
+											proto = "https"
+										}
+									} else if port == 443 || port == 8443 || port == 9443 || port == 4443 {
 										proto = "https"
 									}
-								} else if port == 443 || port == 8443 || port == 9443 || port == 4443 {
-									proto = "https"
+									httpUrls = append(httpUrls, fmt.Sprintf("%s://%s:%d", proto, t.Value, port))
 								}
-								httpUrls = append(httpUrls, fmt.Sprintf("%s://%s:%d", proto, t.Value, port))
-							}
 
-							for _, res := range nResults {
-								addPort(res.Port)
-							}
-							for _, port := range targetPorts {
-								addPort(port)
-							}
+								// If Naabu didn't run or found nothing, try to fetch ports from the DB
+								if len(targetPorts) == 0 {
+									var dbPorts []database.Port
+									db.Where("target_id = ?", t.ID).Find(&dbPorts)
+									for _, p := range dbPorts {
+										targetPorts = append(targetPorts, p.Port)
+										nmapServiceMap[p.Port] = p.Service
+									}
+								}
 
-							utils.LogDebug("[Scanner] Prepared %d URLs for Httpx probing on %s", len(httpUrls), t.Value)
+								// If STILL no ports (brand new target and port scan disabled), fallback to 80/443
+								if len(targetPorts) == 0 {
+									targetPorts = append(targetPorts, 80, 443)
+								}
 
-							if len(httpUrls) > 0 {
-								utils.LogInfo("[Scanner] Triggering Httpx Stage 4 for %d URLs on %s", len(httpUrls), t.Value)
-								httpxMod := modules.Get("httpx")
-								if hx, ok := httpxMod.(*modules.Httpx); ok && hx.CheckInstalled() {
-									webResults, httpxErr := hx.RunRich(ctx, httpUrls)
-									if httpxErr != nil {
-										utils.LogError("[Scanner] Httpx Stage 4 failed: %v", httpxErr)
-									} else {
-										// Save WebAssets
-										count := 0
-										for _, w := range webResults {
-											if w.URL == "" {
-												continue
-											}
+								for _, res := range nResults {
+									addPort(res.Port)
+								}
+								for _, port := range targetPorts {
+									addPort(port)
+								}
 
-											// Run Wappalyzer analysis with response headers
-											wapp := modules.Get("wappalyzer")
-											if wappalyzer, ok := wapp.(*modules.Wappalyzer); ok {
-												// Parse response headers from httpx response
-												headers := extractHeadersFromResponse(w.Response)
-												bodyBytes := []byte(w.Response)
+								utils.LogDebug("[Scanner] Prepared %d URLs for Httpx probing on %s", len(httpUrls), t.Value)
 
-												extraTech := wappalyzer.Analyze(headers, bodyBytes)
-
-												// Merge unique technologies
-												existing := make(map[string]bool)
-												for _, tech := range w.Tech {
-													existing[tech] = true
-												}
-												for _, tech := range extraTech {
-													if !existing[tech] {
-														w.Tech = append(w.Tech, tech)
-														existing[tech] = true
-													}
-												}
-
-												if len(w.Tech) > 0 {
-													wappLog := fmt.Sprintf("Target: %s\nDetected Technologies:\n%s", w.URL, strings.Join(w.Tech, ", "))
-													recordResult(db, t.ID, "wappalyzer", wappLog)
-												}
-											}
-
-											techStr := strings.Join(w.Tech, ", ")
-
-											db.Clauses(clause.OnConflict{
-												Columns: []clause.Column{{Name: "target_id"}, {Name: "url"}},
-												DoUpdates: clause.AssignmentColumns([]string{
-													"title", "tech_stack", "web_server", "status_code",
-													"content_len", "word_count", "line_count", "content_type",
-													"location", "ip", "cname", "cdn", "response", "updated_at",
-												}),
-											}).Create(&database.WebAsset{
-												TargetID:    t.ID,
-												URL:         w.URL,
-												Title:       w.Title,
-												TechStack:   techStr,
-												WebServer:   w.WebServer,
-												StatusCode:  w.StatusCode,
-												ContentLen:  w.ContentLen,
-												WordCount:   w.WordCount,
-												LineCount:   w.LineCount,
-												ContentType: w.ContentType,
-												Location:    w.Location,
-												IP:          strings.Join(w.A, ", "),
-												CNAME:       strings.Join(w.CNAMEs, ", "),
-												CDN:         w.CDNName,
-												Response:    "",
-											})
-											count++
-										}
-
-										utils.LogSuccess("[Scanner] [Httpx] Enriched %d web assets on %s", count, t.Value)
-
-										// --- STAGES 5-6: Parallel Web Asset Processing ---
-										gw := modules.Get("gowitness")
-										kat := modules.Get("katana")
-										urlF := modules.Get("urlfinder")
-
-										gowitnessMod, gwOk := gw.(*modules.Gowitness)
-										katanaMod, katOk := kat.(*modules.Katana)
-										urlMod, urlOk := urlF.(*modules.Urlfinder)
-
-										gwInstalled := gwOk && gowitnessMod.CheckInstalled()
-										katInstalled := katOk && katanaMod.CheckInstalled()
-										urlInstalled := urlOk && urlMod.CheckInstalled()
-
-										if gwInstalled || katInstalled {
-											utils.LogInfo("[Scanner] Triggering parallel web asset processing for %d URLs on %s", count, t.Value)
-
-											var webWG sync.WaitGroup
-											sem := make(chan struct{}, 10)
-
+								if len(httpUrls) > 0 {
+									utils.LogInfo("[Scanner] Triggering Httpx Stage 4 for %d URLs on %s", len(httpUrls), t.Value)
+									httpxMod := modules.Get("httpx")
+									if hx, ok := httpxMod.(*modules.Httpx); ok && hx.CheckInstalled() {
+										webResults, httpxErr := hx.RunRich(ctx, httpUrls)
+										if httpxErr != nil {
+											utils.LogError("[Scanner] Httpx Stage 4 failed: %v", httpxErr)
+										} else {
+											// Save WebAssets
+											count := 0
 											for _, w := range webResults {
 												if w.URL == "" {
 													continue
 												}
 
-												webWG.Add(1)
-												go func(webResult modules.HttpxResult) {
-													defer webWG.Done()
-													sem <- struct{}{}
-													defer func() { <-sem }()
+												// Run Wappalyzer analysis with response headers
+												wapp := modules.Get("wappalyzer")
+												if wappalyzer, ok := wapp.(*modules.Wappalyzer); ok {
+													// Parse response headers from httpx response
+													headers := extractHeadersFromResponse(w.Response)
+													bodyBytes := []byte(w.Response)
 
-													// --- Gowitness Screenshot ---
-													if gwInstalled {
-														shotPath, gwOut, gwErr := gowitnessMod.RunSingle(ctx, webResult.URL)
-														if gwOut != "" {
-															recordResult(db, t.ID, "gowitness", gwOut)
+													extraTech := wappalyzer.Analyze(headers, bodyBytes)
+
+													// Merge unique technologies
+													existing := make(map[string]bool)
+													for _, tech := range w.Tech {
+														existing[tech] = true
+													}
+													for _, tech := range extraTech {
+														if !existing[tech] {
+															w.Tech = append(w.Tech, tech)
+															existing[tech] = true
 														}
-														if gwErr != nil {
-															utils.LogDebug("[Scanner] Gowitness failed for %s: %v", webResult.URL, gwErr)
-														} else {
-															if _, statErr := os.Stat(shotPath); statErr == nil {
+													}
+
+													if len(w.Tech) > 0 {
+														wappLog := fmt.Sprintf("Target: %s\nDetected Technologies:\n%s", w.URL, strings.Join(w.Tech, ", "))
+														recordResult(db, t.ID, "wappalyzer", wappLog)
+													}
+												}
+
+												techStr := strings.Join(w.Tech, ", ")
+
+												db.Clauses(clause.OnConflict{
+													Columns: []clause.Column{{Name: "target_id"}, {Name: "url"}},
+													DoUpdates: clause.AssignmentColumns([]string{
+														"title", "tech_stack", "web_server", "status_code",
+														"content_len", "word_count", "line_count", "content_type",
+														"location", "ip", "cname", "cdn", "response", "updated_at",
+													}),
+												}).Create(&database.WebAsset{
+													TargetID:    t.ID,
+													URL:         w.URL,
+													Title:       w.Title,
+													TechStack:   techStr,
+													WebServer:   w.WebServer,
+													StatusCode:  w.StatusCode,
+													ContentLen:  w.ContentLen,
+													WordCount:   w.WordCount,
+													LineCount:   w.LineCount,
+													ContentType: w.ContentType,
+													Location:    w.Location,
+													IP:          strings.Join(w.A, ", "),
+													CNAME:       strings.Join(w.CNAMEs, ", "),
+													CDN:         w.CDNName,
+													Response:    "",
+												})
+												count++
+											}
+
+											utils.LogSuccess("[Scanner] [Httpx] Enriched %d web assets on %s", count, t.Value)
+
+											// --- STAGES 5-6: Parallel Web Asset Processing ---
+											gw := modules.Get("gowitness")
+											kat := modules.Get("katana")
+											urlF := modules.Get("urlfinder")
+
+											gowitnessMod, gwOk := gw.(*modules.Gowitness)
+											katanaMod, katOk := kat.(*modules.Katana)
+											urlMod, urlOk := urlF.(*modules.Urlfinder)
+
+											gwInstalled := gwOk && gowitnessMod.CheckInstalled()
+											katInstalled := katOk && katanaMod.CheckInstalled()
+											urlInstalled := urlOk && urlMod.CheckInstalled()
+
+											if gwInstalled || katInstalled {
+												utils.LogInfo("[Scanner] Triggering parallel web asset processing for %d URLs on %s", count, t.Value)
+
+												var webWG sync.WaitGroup
+												sem := make(chan struct{}, 10)
+
+												for _, w := range webResults {
+													if w.URL == "" {
+														continue
+													}
+
+													webWG.Add(1)
+													go func(webResult modules.HttpxResult) {
+														defer webWG.Done()
+														sem <- struct{}{}
+														defer func() { <-sem }()
+
+														// --- Gowitness Screenshot ---
+														if gwInstalled {
+															shotPath, gwOut, gwErr := gowitnessMod.RunSingle(ctx, webResult.URL)
+															if gwOut != "" {
+																recordResult(db, t.ID, "gowitness", gwOut)
+															}
+															if gwErr != nil {
+																utils.LogDebug("[Scanner] Gowitness failed for %s: %v", webResult.URL, gwErr)
+															} else {
+																if _, statErr := os.Stat(shotPath); statErr == nil {
+																	db.Model(&database.WebAsset{}).
+																		Where("target_id = ? AND url = ?", t.ID, webResult.URL).
+																		Update("screenshot", shotPath)
+																}
+															}
+														}
+
+														// --- Katana & URLFinder ---
+														if katInstalled {
+															uniquePaths := make(map[string]bool)
+															var pathsList []string
+															var pathsMu sync.Mutex
+
+															processOutput := func(rawOutput string) {
+																lines := strings.Split(rawOutput, "\n")
+																pathsMu.Lock()
+																defer pathsMu.Unlock()
+																for _, line := range lines {
+																	line = strings.TrimSpace(line)
+																	if line == "" {
+																		continue
+																	}
+																	if strings.HasPrefix(line, "http") {
+																		u, parseErr := url.Parse(line)
+																		if parseErr == nil && u.Path != "" {
+																			pathVal := u.Path
+																			if !uniquePaths[pathVal] {
+																				uniquePaths[pathVal] = true
+																				pathsList = append(pathsList, pathVal)
+																			}
+																		} else if parseErr == nil {
+																			if !uniquePaths["/"] {
+																				uniquePaths["/"] = true
+																				pathsList = append(pathsList, "/")
+																			}
+																		}
+																	} else {
+																		if !uniquePaths[line] {
+																			uniquePaths[line] = true
+																			pathsList = append(pathsList, line)
+																		}
+																	}
+																}
+															}
+
+															// Run Katana
+															args := []string{"-jc", "-kf", "all", "-fx", "-d", "5", "-pc", "-c", "20"}
+															katanaOutput, katErr := katanaMod.RunCustom(ctx, webResult.URL, args)
+															recordResult(db, t.ID, "katana", katanaOutput)
+															if katErr == nil {
+																processOutput(katanaOutput)
+															}
+
+															// Run URLFinder
+															if urlInstalled {
+																u, parseErr := url.Parse(webResult.URL)
+																if parseErr == nil && u.Host != "" {
+																	urlHostname := u.Hostname()
+																	if urlHostname != "" {
+																		urlOutput, urlErr := urlMod.Run(ctx, urlHostname)
+																		recordResult(db, t.ID, "urlfinder", urlOutput)
+																		if urlErr == nil {
+																			processOutput(urlOutput)
+																		}
+																	}
+																}
+															}
+
+															// Save combined paths
+															sort.Strings(pathsList)
+															jsonBytes, jsonErr := json.Marshal(pathsList)
+															if jsonErr != nil {
+																utils.LogError("[Scanner] Failed to marshal katana paths: %v", jsonErr)
+															} else {
 																db.Model(&database.WebAsset{}).
 																	Where("target_id = ? AND url = ?", t.ID, webResult.URL).
-																	Update("screenshot", shotPath)
+																	Update("katana_output", string(jsonBytes))
 															}
 														}
-													}
-
-													// --- Katana & URLFinder ---
-													if katInstalled {
-														uniquePaths := make(map[string]bool)
-														var pathsList []string
-														var pathsMu sync.Mutex
-
-														processOutput := func(rawOutput string) {
-															lines := strings.Split(rawOutput, "\n")
-															pathsMu.Lock()
-															defer pathsMu.Unlock()
-															for _, line := range lines {
-																line = strings.TrimSpace(line)
-																if line == "" {
-																	continue
-																}
-																if strings.HasPrefix(line, "http") {
-																	u, parseErr := url.Parse(line)
-																	if parseErr == nil && u.Path != "" {
-																		pathVal := u.Path
-																		if !uniquePaths[pathVal] {
-																			uniquePaths[pathVal] = true
-																			pathsList = append(pathsList, pathVal)
-																		}
-																	} else if parseErr == nil {
-																		if !uniquePaths["/"] {
-																			uniquePaths["/"] = true
-																			pathsList = append(pathsList, "/")
-																		}
-																	}
-																} else {
-																	if !uniquePaths[line] {
-																		uniquePaths[line] = true
-																		pathsList = append(pathsList, line)
-																	}
-																}
-															}
-														}
-
-														// Run Katana
-														args := []string{"-jc", "-kf", "all", "-fx", "-d", "5", "-pc", "-c", "20"}
-														katanaOutput, katErr := katanaMod.RunCustom(ctx, webResult.URL, args)
-														recordResult(db, t.ID, "katana", katanaOutput)
-														if katErr == nil {
-															processOutput(katanaOutput)
-														}
-
-														// Run URLFinder
-														if urlInstalled {
-															u, parseErr := url.Parse(webResult.URL)
-															if parseErr == nil && u.Host != "" {
-																urlHostname := u.Hostname()
-																if urlHostname != "" {
-																	urlOutput, urlErr := urlMod.Run(ctx, urlHostname)
-																	recordResult(db, t.ID, "urlfinder", urlOutput)
-																	if urlErr == nil {
-																		processOutput(urlOutput)
-																	}
-																}
-															}
-														}
-
-														// Save combined paths
-														sort.Strings(pathsList)
-														jsonBytes, jsonErr := json.Marshal(pathsList)
-														if jsonErr != nil {
-															utils.LogError("[Scanner] Failed to marshal katana paths: %v", jsonErr)
-														} else {
-															db.Model(&database.WebAsset{}).
-																Where("target_id = ? AND url = ?", t.ID, webResult.URL).
-																Update("katana_output", string(jsonBytes))
-														}
-													}
-												}(w)
+													}(w)
+												}
+												webWG.Wait()
 											}
-											webWG.Wait()
 										}
 									}
 								}
@@ -704,11 +744,17 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 						}
 					}
 
-					// --- STAGE 7: CVE Lookup via Cvemap (Per-Worker/Per-Target) ---
-					sm.runCvemapScan(ctx, db, t)
+					if profile.EnableVulnScan {
+						// --- STAGE 7: CVE Lookup via Cvemap (Per-Worker/Per-Target) ---
+						if profile.EnableCvemap {
+							sm.runCvemapScan(ctx, db, t)
+						}
 
-					// --- STAGE 8: Nuclei Vulnerability Scanning (Per-Port) ---
-					sm.runNucleiScan(ctx, db, t)
+						// --- STAGE 8: Nuclei Vulnerability Scanning (Per-Port) ---
+						if profile.EnableNuclei {
+							sm.runNucleiScan(ctx, db, t)
+						}
+					}
 				}
 			}()
 		}
