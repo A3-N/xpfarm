@@ -1,6 +1,7 @@
 # Base image
-# Using latest to ensure support for modern toolchains (e.g. subfinder needs 1.24+)
-FROM golang:1.25.5-bookworm
+FROM golang:latest
+
+ENV GOTOOLCHAIN=auto
 
 # Set working directory
 WORKDIR /app

@@ -28,9 +28,12 @@ docker run -p 8888:8888 -v $(pwd)/data:/app/data -v $(pwd)/screenshots:/app/scre
 
 ## TODO
 
-- [ ] Vuln scan nuclei only
 - [ ] Global Search redo
+- [ ] nuclei cvemap scan break
+- [ ] Vuln scan nuclei only
 - [ ] Agent Hell
+
+### NTH
 - [ ] SecretFinder JS
 - [ ] Repo detect/scan
 - [ ] Mobile scan
