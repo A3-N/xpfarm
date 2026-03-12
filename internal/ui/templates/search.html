@@ -3,14 +3,13 @@
 {{define "content"}}
 <div class="search-header">
     <h1>Global Search</h1>
-    <p class="subtitle">Construct dynamic queries across Assets, Targets, Ports, and Vulnerabilities.</p>
+    <p class="subtitle">Query across Targets, Web Assets, Ports, Vulnerabilities, and CVEs — all filters use regex.</p>
 </div>
 
 <div class="search-container">
     <div class="saved-queries-panel card">
         <h3>Saved Queries</h3>
         <div class="saved-queries-list" id="savedQueriesList">
-            <!-- Will be populated via JS or template -->
             {{if .SavedSearches}}
             {{range .SavedSearches}}
             <div class="saved-query-item">
@@ -33,17 +32,43 @@
             </div>
         </div>
 
-        <div class="rules-container" id="rulesContainer">
-            <!-- Dynamic rules added here -->
+        <!-- Source Selector -->
+        <div class="source-selector">
+            <label>Data Source</label>
+            <div class="source-tabs" id="sourceTabs">
+                <button type="button" class="source-tab active" data-source="targets" onclick="selectSource(this)">Targets</button>
+                <button type="button" class="source-tab" data-source="web_assets" onclick="selectSource(this)">Web Assets</button>
+                <button type="button" class="source-tab" data-source="ports" onclick="selectSource(this)">Ports</button>
+                <button type="button" class="source-tab" data-source="vulnerabilities" onclick="selectSource(this)">Vulnerabilities</button>
+                <button type="button" class="source-tab" data-source="cves" onclick="selectSource(this)">CVEs</button>
+            </div>
         </div>
 
+        <!-- Column Picker -->
+        <div class="column-picker">
+            <div class="column-picker-header">
+                <label>Output Columns</label>
+                <div class="distinct-toggle">
+                    <span>Unique only</span>
+                    <label class="switch">
+                        <input type="checkbox" id="distinctToggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="column-chips" id="columnChips"></div>
+        </div>
+
+        <!-- Rules -->
+        <div class="rules-container" id="rulesContainer"></div>
+
         <div style="margin-bottom: 25px;">
-            <button class="btn btn-secondary" onclick="addRule()" style="width: 100%;">+ Add Rule</button>
+            <button type="button" class="btn btn-secondary" onclick="addRule()" style="width: 100%;">+ Add Condition</button>
         </div>
 
         <div class="save-query-section">
-            <input type="text" id="saveQueryName" placeholder="Query Name (e.g. Broken React Apps)">
-            <button class="btn btn-secondary" onclick="saveCurrentQuery()">Save Query</button>
+            <input type="text" id="saveQueryName" placeholder="Query Name (e.g. Exposed Admin Panels)">
+            <button type="button" class="btn btn-secondary" onclick="saveCurrentQuery()">Save Query</button>
         </div>
     </div>
 </div>
@@ -51,109 +76,43 @@
 <div class="results-container card" id="resultsContainer" style="display: none; margin-bottom: 25px;">
     <div class="results-header">
         <h3>Results <span id="resultsCount" class="badge badge-cf">0</span></h3>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="exportCSV()" id="exportBtn" style="display:none;">Export CSV</button>
     </div>
     <div class="table-responsive">
         <table id="resultsTable">
-            <thead>
-                <tr>
-                    <th>Type</th>
-                    <th>Value / Location</th>
-                    <th>Details</th>
-                    <th>Asset</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody id="resultsBody">
-                <!-- Results populated here -->
-            </tbody>
+            <thead id="resultsHead"><tr></tr></thead>
+            <tbody id="resultsBody"></tbody>
         </table>
     </div>
 </div>
 
 <div class="helper-text-container card">
-    <h4 style="margin-top: 0; margin-bottom: 15px; color: var(--color-primary);">Search Syntax Guide & Examples</h4>
+    <h4 style="margin-top: 0; margin-bottom: 15px; color: var(--color-primary);">How It Works</h4>
     <div class="text-muted" style="font-size: 0.95rem; line-height: 1.6; color: #a1a1aa;">
         <p style="margin-top: 0; margin-bottom: 15px;">
-            Construct advanced queries by combining multiple rules using <strong>AND / OR</strong> logic. This search
-            engine seamlessly queries across Assets, Targets, Ports, Web Servers, and Vulnerabilities simultaneously.
+            <strong>1. Pick a data source</strong> — choose what to query (Targets, Web Assets, Ports, Vulns, CVEs).<br>
+            <strong>2. Choose output columns</strong> — click chips to toggle fields. <em>Unique only</em> deduplicates results.<br>
+            <strong>3. Add conditions</strong> — every filter value is a <strong>regex pattern</strong> (case-insensitive). Use the <strong>NOT</strong> toggle to exclude matches.<br>
+            <strong>4. Search</strong> — results show exactly the columns you selected.
         </p>
 
-        <h5 style="color: var(--color-text); margin-bottom: 8px;">Matching Operators:</h5>
-        <ul style="margin-top: 0; margin-bottom: 20px; padding-left: 20px;">
-            <li style="margin-bottom: 6px;"><strong>Matches Pattern (*):</strong> Uses SQL wildcards. Use <code>*</code>
-                to match any characters. <i>(Highly efficient)</i></li>
-            <li style="margin-bottom: 6px;"><strong>Matches Regex:</strong> Uses native Go regular expressions for
-                precise filtering. <i>(Evaluated post-fetch)</i></li>
-            <li style="margin-bottom: 6px;"><strong>Equals / Contains:</strong> Standard exact or partial text matching.
-            </li>
-            <li style="margin-bottom: 6px;"><strong>Greater/Less Than:</strong> Useful for numeric fields like Ports or
-                Status Codes.</li>
-        </ul>
-
-        <h5 style="color: var(--color-text); margin-bottom: 10px;">Field Examples:</h5>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-            <div>
-                <strong style="color: var(--color-text);">Target Type</strong><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Equals: domain</code>
-            </div>
-            <div>
-                <strong style="color: var(--color-text);">Target Value (Domain/IP)</strong><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Matches Pattern: *.corp.local</code>
-            </div>
-            <div>
-                <strong style="color: var(--color-text);">Target Status</strong><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Equals: up</code>
-            </div>
-            <div>
-                <strong style="color: var(--color-text);">Tech Stack</strong><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Matches Pattern: *react*</code>
-            </div>
-            <div>
-                <strong style="color: var(--color-text);">Status Code</strong><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Equals: 200</code><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Greater Than (>): 399</code>
-            </div>
-            <div>
-                <strong style="color: var(--color-text);">URL/Path</strong><br>
-                <code
-                    style="color: #94a3b8; background: transparent; padding: 0;">Matches Regex: ^https?://.*\.js$</code><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Contains: /api/v1/</code>
-            </div>
-            <div>
-                <strong style="color: var(--color-text);">Page Title</strong><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Matches Pattern: *admin*</code>
-            </div>
-            <div>
-                <strong style="color: var(--color-text);">Port Number</strong><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Not Equals: 80</code>
-            </div>
-            <div>
-                <strong style="color: var(--color-text);">Port Service</strong><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Contains: ssh</code>
-            </div>
-            <div>
-                <strong style="color: var(--color-text);">Vuln Name</strong><br>
-                <code style="color: #94a3b8; background: transparent; padding: 0;">Contains: CVE-2024</code>
-            </div>
-            <div>
-                <strong style="color: var(--color-text);">Vuln Severity</strong><br>
-                <code
-                    style="color: #94a3b8; background: transparent; padding: 0;">Matches Regex: ^(critical|high)$</code>
-            </div>
+        <h5 style="color: var(--color-text); margin-bottom: 10px;">Regex Examples:</h5>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.9rem;">
+            <div><code>admin</code> — matches anything containing "admin"</div>
+            <div><code>^(critical|high)$</code> — exact match: "critical" or "high"</div>
+            <div><code>^80$</code> — exact port 80</div>
+            <div><code>\.js$</code> — URLs ending in .js</div>
+            <div><code>^https?://</code> — URLs starting with http/https</div>
+            <div><code>CVE-202[3-5]</code> — CVEs from 2023–2025</div>
+            <div><code>react|vue|angular</code> — any of these tech stacks</div>
+            <div><code>.*</code> — match everything (show all)</div>
         </div>
     </div>
 </div>
 
 <style>
-    .search-header {
-        margin-bottom: 20px;
-    }
-
-    .subtitle {
-        color: var(--color-muted);
-        margin-top: -15px;
-        font-size: 0.95rem;
-    }
+    .search-header { margin-bottom: 20px; }
+    .subtitle { color: var(--color-muted); margin-top: -15px; font-size: 0.95rem; }
 
     .search-container {
         display: grid;
@@ -162,181 +121,205 @@
         margin-bottom: 20px;
     }
 
-    .saved-queries-panel {
-        background-color: var(--bg-card);
-    }
-
+    .saved-queries-panel { background-color: var(--bg-card); }
     .saved-queries-list {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        margin-top: 15px;
+        display: flex; flex-direction: column; gap: 10px;
+        margin-top: 15px; max-height: 500px; overflow-y: auto;
     }
-
     .saved-query-item {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 10px;
-        background-color: var(--bg-body);
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        transition: border-color 0.2s;
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 10px; background-color: var(--bg-body);
+        border: 1px solid var(--border-color); border-radius: 6px; transition: border-color 0.2s;
     }
-
-    .saved-query-item:hover {
-        border-color: var(--color-primary);
-    }
-
+    .saved-query-item:hover { border-color: var(--color-primary); }
     .sq-name {
-        cursor: pointer;
-        color: var(--color-text);
-        flex-grow: 1;
-        font-weight: 500;
-        font-size: 0.9rem;
+        cursor: pointer; color: var(--color-text); flex-grow: 1;
+        font-weight: 500; font-size: 0.9rem;
     }
 
     .qb-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-        padding-bottom: 15px;
-        border-bottom: 1px solid var(--border-color);
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color);
+    }
+    .qb-actions { display: flex; gap: 10px; }
+
+    .source-selector { margin-bottom: 20px; }
+    .source-selector > label {
+        display: block; margin-bottom: 8px; font-weight: 600;
+        color: var(--color-text); font-size: 0.85rem;
+        text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .source-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .source-tab {
+        padding: 8px 16px; border: 1px solid var(--border-color); border-radius: 6px;
+        background: var(--bg-body); color: var(--color-muted); cursor: pointer;
+        font-size: 0.9rem; font-weight: 500; transition: all 0.2s;
+    }
+    .source-tab:hover { border-color: var(--color-primary); color: var(--color-text); }
+    .source-tab.active { background: var(--color-primary); color: white; border-color: var(--color-primary); }
+
+    .column-picker {
+        margin-bottom: 20px; padding: 15px; background: var(--bg-body);
+        border: 1px solid var(--border-color); border-radius: 6px;
+    }
+    .column-picker-header {
+        display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+    }
+    .column-picker-header > label {
+        font-weight: 600; color: var(--color-text); font-size: 0.85rem;
+        text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .distinct-toggle {
+        display: flex; align-items: center; gap: 8px;
+        color: var(--color-muted); font-size: 0.85rem;
+    }
+    .column-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .col-chip {
+        padding: 5px 12px; border-radius: 20px; font-size: 0.82rem; cursor: pointer;
+        border: 1px solid var(--border-color); background: var(--bg-card);
+        color: var(--color-muted); transition: all 0.2s; user-select: none;
+    }
+    .col-chip:hover { border-color: var(--color-primary); }
+    .col-chip.selected {
+        background: rgba(99, 102, 241, 0.2); border-color: var(--color-primary);
+        color: var(--color-primary); font-weight: 600;
     }
 
-    .qb-actions {
-        display: flex;
-        gap: 10px;
-    }
-
-    .rules-container {
-        display: flex;
-        flex-direction: column;
-        gap: 15px;
-        margin-bottom: 15px;
-    }
-
+    .rules-container { display: flex; flex-direction: column; gap: 12px; margin-bottom: 15px; }
     .rule-row {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        background-color: var(--bg-body);
-        padding: 15px;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
+        display: flex; gap: 10px; align-items: center;
+        background-color: var(--bg-body); padding: 12px 15px;
+        border: 1px solid var(--border-color); border-radius: 6px;
     }
+    .rule-row select, .rule-row input[type="text"] {
+        padding: 8px 12px; background-color: var(--bg-card);
+        border: 1px solid var(--border-color); border-radius: 4px; color: white;
+    }
+    .rule-field { width: 200px; }
+    .rule-value { flex-grow: 1; min-width: 200px; }
 
-    .rule-row select,
-    .rule-row input {
-        padding: 8px 12px;
-        background-color: var(--bg-card);
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        color: white;
+    .negate-toggle {
+        display: flex; align-items: center; gap: 4px; cursor: pointer;
+        padding: 6px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600;
+        border: 1px solid var(--border-color); background: var(--bg-card);
+        color: var(--color-muted); transition: all 0.2s; user-select: none;
+        white-space: nowrap;
     }
-
-    .rule-field {
-        width: 220px;
-    }
-
-    .rule-operator {
-        width: 180px;
-    }
-
-    .rule-value {
-        flex-grow: 1;
-        min-width: 250px;
-    }
+    .negate-toggle.active { background: rgba(239, 68, 68, 0.2); border-color: #ef4444; color: #ef4444; }
 
     .save-query-section {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        margin-top: 20px;
-        padding-top: 20px;
-        border-top: 1px solid var(--border-color);
+        display: flex; gap: 10px; align-items: center;
+        margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color);
     }
+    .save-query-section input { width: 300px; }
 
-    .save-query-section input {
-        width: 300px;
-    }
-
-    .btn-danger {
-        background-color: rgba(239, 68, 68, 0.2);
-        color: #ef4444;
-        border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-
-    .btn-danger:hover {
-        background-color: #ef4444;
-        color: white;
-    }
-
-    .btn-sm {
-        padding: 4px 8px;
-        font-size: 0.8rem;
-    }
-
-    .text-muted {
-        color: var(--color-muted);
-    }
-
-    .logical-op {
-        font-weight: bold;
-        color: var(--color-primary);
-        width: 80px;
-        text-align: center;
-    }
+    .btn-danger { background-color: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .btn-danger:hover { background-color: #ef4444; color: white; }
+    .btn-sm { padding: 4px 8px; font-size: 0.8rem; }
+    .text-muted { color: var(--color-muted); }
+    .logical-op { font-weight: bold; color: var(--color-primary); width: 70px; text-align: center; flex-shrink: 0; }
+    .results-header { display: flex; justify-content: space-between; align-items: center; }
+    #resultsTable th { text-transform: capitalize; white-space: nowrap; }
+    #resultsTable td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #resultsTable td:hover { white-space: normal; word-break: break-all; }
 </style>
 
 <script>
-    // Initial rule
-    document.addEventListener("DOMContentLoaded", () => {
+    // -----------------------------------------------------------------------
+    // State
+    // -----------------------------------------------------------------------
+    let currentSource = 'targets';
+    let availableColumns = [];
+    let selectedColumns = new Set();
+    const columnLabels = {};
+
+    // -----------------------------------------------------------------------
+    // Init
+    // -----------------------------------------------------------------------
+    document.addEventListener("DOMContentLoaded", async () => {
+        await loadColumnsForSource(currentSource, true);
         if (document.querySelectorAll('.rule-row').length === 0) {
             addRule();
         }
     });
 
-    const fields = [
-        { value: "target.type", label: "Target Type" },
-        { value: "target.value", label: "Target Value (Domain/IP)" },
-        { value: "target.status", label: "Target Status" },
-        { value: "web.tech_stack", label: "Tech Stack" },
-        { value: "web.status_code", label: "Status Code" },
-        { value: "web.url", label: "URL/Path" },
-        { value: "web.title", label: "Page Title" },
-        { value: "port.port", label: "Port Number" },
-        { value: "port.service", label: "Port Service" },
-        { value: "vuln.name", label: "Vuln Name" },
-        { value: "vuln.severity", label: "Vuln Severity" }
-    ];
+    // -----------------------------------------------------------------------
+    // Source Tabs
+    // -----------------------------------------------------------------------
+    async function selectSource(el) {
+        currentSource = el.getAttribute('data-source');
+        document.querySelectorAll('.source-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        await loadColumnsForSource(currentSource, true);
+        rebuildRuleFieldOptions();
+    }
 
-    const operators = [
-        { value: "contains", label: "Contains" },
-        { value: "equals", label: "Equals" },
-        { value: "not_equals", label: "Not Equals" },
-        { value: "regex", label: "Matches Regex" },
-        { value: "glob", label: "Matches Pattern (*)" },
-        { value: "gt", label: "Greater Than (>)" },
-        { value: "lt", label: "Less Than (<)" }
-    ];
+    // -----------------------------------------------------------------------
+    // Column Picker
+    // -----------------------------------------------------------------------
+    async function loadColumnsForSource(source, resetSelection) {
+        try {
+            const res = await fetch('/api/search/columns?source=' + source);
+            availableColumns = await res.json();
+            availableColumns.forEach(c => { columnLabels[c.value] = c.label; });
+            if (resetSelection) {
+                selectedColumns = new Set(getDefaultColumns(source));
+            }
+            renderColumnChips();
+        } catch (e) {
+            console.error('Failed to load columns:', e);
+        }
+    }
 
+    function getDefaultColumns(source) {
+        const defaults = {
+            'targets': ['target.value', 'target.type', 'target.status', 'asset.name'],
+            'web_assets': ['web.url', 'web.title', 'web.status_code', 'web.tech_stack', 'target.value'],
+            'ports': ['port.port', 'port.protocol', 'port.service', 'port.product', 'target.value'],
+            'vulnerabilities': ['vuln.name', 'vuln.severity', 'vuln.template_id', 'target.value'],
+            'cves': ['cve.id', 'cve.severity', 'cve.cvss_score', 'cve.product', 'target.value']
+        };
+        return defaults[source] || ['target.value', 'target.type'];
+    }
+
+    function renderColumnChips() {
+        const container = document.getElementById('columnChips');
+        container.innerHTML = '';
+        availableColumns.forEach(col => {
+            const chip = document.createElement('span');
+            chip.className = 'col-chip' + (selectedColumns.has(col.value) ? ' selected' : '');
+            chip.textContent = col.label;
+            chip.setAttribute('data-col', col.value);
+            chip.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (selectedColumns.has(col.value)) {
+                    selectedColumns.delete(col.value);
+                    this.classList.remove('selected');
+                } else {
+                    selectedColumns.add(col.value);
+                    this.classList.add('selected');
+                }
+            });
+            container.appendChild(chip);
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Rule Builder — regex only, no operator dropdown
+    // -----------------------------------------------------------------------
     function addRule(existingData = null) {
         const container = document.getElementById('rulesContainer');
         const isFirst = container.children.length === 0;
-
         const row = document.createElement('div');
         row.className = 'rule-row';
 
-        // Logical Operator (AND/OR)
+        // Logical
         if (!isFirst) {
             const logicalOp = document.createElement('select');
             logicalOp.className = 'logical-op';
             logicalOp.innerHTML = '<option value="AND">AND</option><option value="OR">OR</option>';
-            if (existingData && existingData.logical) {
-                logicalOp.value = existingData.logical;
-            }
+            if (existingData && existingData.logical) logicalOp.value = existingData.logical;
             row.appendChild(logicalOp);
         } else {
             const spacer = document.createElement('div');
@@ -345,85 +328,122 @@
             row.appendChild(spacer);
         }
 
-        // Field Selector
+        // Field
         const fieldSel = document.createElement('select');
         fieldSel.className = 'rule-field';
-        fields.forEach(f => {
-            fieldSel.innerHTML += `<option value="${f.value}">${f.label}</option>`;
-        });
-        if (existingData) fieldSel.value = existingData.field;
+        populateFieldOptions(fieldSel);
+        if (existingData && existingData.field) fieldSel.value = existingData.field;
         row.appendChild(fieldSel);
 
-        // Operator Selector
-        const opSel = document.createElement('select');
-        opSel.className = 'rule-operator';
-        operators.forEach(o => {
-            opSel.innerHTML += `<option value="${o.value}">${o.label}</option>`;
+        // Negate toggle
+        const negBtn = document.createElement('button');
+        negBtn.type = 'button';
+        negBtn.className = 'negate-toggle' + ((existingData && existingData.negate) ? ' active' : '');
+        negBtn.textContent = 'NOT';
+        negBtn.title = 'Exclude matches';
+        negBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            this.classList.toggle('active');
         });
-        if (existingData) opSel.value = existingData.operator;
-        row.appendChild(opSel);
+        row.appendChild(negBtn);
 
-        // Value Input
+        // Value (regex)
         const valInp = document.createElement('input');
         valInp.className = 'rule-value';
         valInp.type = 'text';
-        valInp.placeholder = 'Value...';
-        if (existingData) valInp.value = existingData.value;
+        valInp.placeholder = 'Regex pattern...';
+        if (existingData && existingData.value) valInp.value = existingData.value;
+        // Support Enter key to search
+        valInp.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                executeSearch();
+            }
+        });
         row.appendChild(valInp);
 
-        // Delete button
+        // Delete
         const delBtn = document.createElement('button');
+        delBtn.type = 'button';
         delBtn.className = 'btn btn-danger btn-sm';
         delBtn.textContent = 'X';
-        delBtn.onclick = () => {
+        delBtn.addEventListener('click', function(e) {
+            e.preventDefault();
             row.remove();
             if (container.children.length > 0) {
-                // If first element became something else, change its logical op to "WHERE" if possible visually
                 const firstRow = container.children[0];
                 const firstOp = firstRow.querySelector('.logical-op');
-                if (firstOp.tagName === 'SELECT') {
+                if (firstOp && firstOp.tagName === 'SELECT') {
                     const newSpacer = document.createElement('div');
                     newSpacer.className = 'logical-op';
                     newSpacer.textContent = 'WHERE';
                     firstRow.replaceChild(newSpacer, firstOp);
                 }
             } else {
-                addRule(); // always keep one
+                addRule();
             }
-        };
+        });
         row.appendChild(delBtn);
 
         container.appendChild(row);
     }
 
-    function buildQueryPayload() {
-        const rows = document.querySelectorAll('.rule-row');
-        const query = {
-            rules: []
-        };
-
-        rows.forEach((row, index) => {
-            const rule = {};
-            if (index > 0) {
-                rule.logical = row.querySelector('.logical-op').value;
-            }
-            rule.field = row.querySelector('.rule-field').value;
-            rule.operator = row.querySelector('.rule-operator').value;
-            rule.value = row.querySelector('.rule-value').value;
-            query.rules.push(rule);
+    function populateFieldOptions(selectEl) {
+        selectEl.innerHTML = '';
+        availableColumns.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.value;
+            opt.textContent = c.label;
+            selectEl.appendChild(opt);
         });
-
-        return query;
     }
 
+    function rebuildRuleFieldOptions() {
+        document.querySelectorAll('.rule-field').forEach(sel => {
+            const prev = sel.value;
+            populateFieldOptions(sel);
+            const stillValid = availableColumns.some(c => c.value === prev);
+            if (stillValid) sel.value = prev;
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Payload
+    // -----------------------------------------------------------------------
+    function buildQueryPayload() {
+        const rows = document.querySelectorAll('.rule-row');
+        const payload = {
+            source: currentSource,
+            columns: Array.from(selectedColumns),
+            distinct: document.getElementById('distinctToggle').checked,
+            rules: []
+        };
+        rows.forEach((row, idx) => {
+            const rule = {};
+            if (idx > 0) rule.logical = row.querySelector('.logical-op').value;
+            rule.field = row.querySelector('.rule-field').value;
+            rule.value = row.querySelector('.rule-value').value;
+            rule.negate = row.querySelector('.negate-toggle').classList.contains('active');
+            payload.rules.push(rule);
+        });
+        return payload;
+    }
+
+    // -----------------------------------------------------------------------
+    // Execute
+    // -----------------------------------------------------------------------
     async function executeSearch() {
         const payload = buildQueryPayload();
         const resultsContainer = document.getElementById('resultsContainer');
+        const thead = document.getElementById('resultsHead').querySelector('tr');
         const tbody = document.getElementById('resultsBody');
         const countSpan = document.getElementById('resultsCount');
+        const exportBtn = document.getElementById('exportBtn');
 
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Searching...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="99" style="text-align:center;">Searching...</td></tr>';
+        thead.innerHTML = '';
         resultsContainer.style.display = 'block';
+        exportBtn.style.display = 'none';
 
         try {
             const res = await fetch('/api/search', {
@@ -431,103 +451,137 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-
-            if (!res.ok) throw new Error("Search failed");
-
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || 'Search failed');
+            }
             const data = await res.json();
-
             countSpan.textContent = data.length || 0;
-            tbody.innerHTML = '';
 
             if (!data || data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No results found.</td></tr>';
+                thead.innerHTML = '';
+                tbody.innerHTML = '<tr><td colspan="99" style="text-align:center;">No results found.</td></tr>';
                 return;
             }
 
+            const cols = payload.columns.length > 0 ? payload.columns : Object.keys(data[0]);
+            thead.innerHTML = '';
+            cols.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = columnLabels[col] || col;
+                thead.appendChild(th);
+            });
+
+            tbody.innerHTML = '';
             data.forEach(item => {
                 const tr = document.createElement('tr');
-
-                // Construct Row HTML loosely based on what we returned
-                // Example structure item: { Type, Value, Details, AssetName, Link }
-                let actionLink = item.Link ? `<a href="${item.Link}" class="btn btn-secondary btn-sm">View</a>` : '';
-                tr.innerHTML = `
-                    <td><span class="badge badge-id">${item.Type}</span></td>
-                    <td style="word-break: break-all;">${item.Value}</td>
-                    <td>${item.Details}</td>
-                    <td>${item.AssetName}</td>
-                    <td>${actionLink}</td>
-                `;
+                cols.forEach(col => {
+                    const td = document.createElement('td');
+                    const val = item[col];
+                    td.textContent = (val !== null && val !== undefined) ? val : '';
+                    tr.appendChild(td);
+                });
                 tbody.appendChild(tr);
             });
 
+            exportBtn.style.display = 'inline-block';
+            window._lastSearchData = data;
+            window._lastSearchCols = cols;
         } catch (e) {
-            tbody.innerHTML = `<tr><td colspan="5" style="color: red; text-align: center;">Error: ${e.message}</td></tr>`;
+            thead.innerHTML = '';
+            tbody.innerHTML = '<tr><td colspan="99" style="color:red;text-align:center;">Error: ' + e.message + '</td></tr>';
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Export CSV
+    // -----------------------------------------------------------------------
+    function exportCSV() {
+        const data = window._lastSearchData;
+        const cols = window._lastSearchCols;
+        if (!data || !cols) return;
+        const header = cols.map(c => columnLabels[c] || c).join(',');
+        const rows = data.map(row =>
+            cols.map(c => {
+                let v = row[c]; if (v === null || v === undefined) v = '';
+                v = String(v).replace(/"/g, '""'); return '"' + v + '"';
+            }).join(',')
+        );
+        const csv = header + '\n' + rows.join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'search_' + currentSource + '_' + Date.now() + '.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // -----------------------------------------------------------------------
+    // Save / Load / Delete
+    // -----------------------------------------------------------------------
     async function saveCurrentQuery() {
         const name = document.getElementById('saveQueryName').value.trim();
-        if (!name) {
-            alert('Please enter a name for the query.');
-            return;
-        }
-
+        if (!name) { alert('Enter a query name.'); return; }
         const payload = buildQueryPayload();
-
         try {
             const res = await fetch('/api/search/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: name, query_data: JSON.stringify(payload) })
             });
-
-            if (res.ok) {
-                window.location.reload();
-            } else {
-                alert("Failed to save query");
-            }
-        } catch (e) {
-            alert("Error saving: " + e.message);
-        }
+            if (res.ok) window.location.reload(); else alert('Failed to save query');
+        } catch (e) { alert('Error: ' + e.message); }
     }
 
-    function loadQuery(el) {
+    async function loadQuery(el) {
         try {
-            const rawJson = el.getAttribute('data-query');
-            const payload = JSON.parse(rawJson);
-            const container = document.getElementById('rulesContainer');
-            container.innerHTML = ''; // clear
+            const payload = JSON.parse(el.getAttribute('data-query'));
 
-            if (payload && payload.rules) {
-                payload.rules.forEach(rule => {
-                    addRule(rule);
-                });
+            // Restore source
+            if (payload.source) {
+                currentSource = payload.source;
+            } else {
+                currentSource = 'targets'; // backwards compat for old saved queries
+            }
+            document.querySelectorAll('.source-tab').forEach(t => {
+                t.classList.toggle('active', t.getAttribute('data-source') === currentSource);
+            });
+            await loadColumnsForSource(currentSource, false);
+
+            // Restore columns
+            if (payload.columns && payload.columns.length > 0) {
+                selectedColumns = new Set(payload.columns);
+            } else {
+                selectedColumns = new Set(getDefaultColumns(currentSource));
+            }
+            renderColumnChips();
+
+            // Restore distinct
+            document.getElementById('distinctToggle').checked = !!payload.distinct;
+
+            // Restore rules
+            const container = document.getElementById('rulesContainer');
+            container.innerHTML = '';
+            if (payload.rules && payload.rules.length > 0) {
+                payload.rules.forEach(rule => addRule(rule));
+            } else {
+                addRule();
             }
         } catch (e) {
-            alert("Failed to parse saved query data.");
+            alert('Failed to load saved query: ' + e.message);
         }
     }
 
     async function deleteQuery(el) {
-        if (!confirm("Delete this saved query?")) return;
+        if (!confirm('Delete this saved query?')) return;
         try {
             const id = el.getAttribute('data-id');
-            const formData = new FormData();
-            formData.append('id', id);
-
-            const res = await fetch('/api/search/delete', {
-                method: 'POST',
-                body: formData
-            });
-
-            if (res.ok) {
-                window.location.reload();
-            } else {
-                alert("Failed to delete query");
-            }
-        } catch (e) {
-            alert("Error deleting: " + e.message);
-        }
+            const fd = new FormData();
+            fd.append('id', id);
+            const res = await fetch('/api/search/delete', { method: 'POST', body: fd });
+            if (res.ok) window.location.reload(); else alert('Failed to delete');
+        } catch (e) { alert('Error: ' + e.message); }
     }
 </script>
 {{end}}

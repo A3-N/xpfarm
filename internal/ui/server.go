@@ -445,6 +445,15 @@ func StartServer(port string) error {
 		c.Status(http.StatusOK)
 	})
 
+	r.GET("/api/search/columns", func(c *gin.Context) {
+		source := c.Query("source")
+		if source == "" {
+			source = "targets"
+		}
+		cols := core.SourceColumns(source)
+		c.JSON(http.StatusOK, cols)
+	})
+
 	// Assets
 	r.GET("/assets", func(c *gin.Context) {
 		// We already fetch assets in getGlobalContext, but the page specific logic
