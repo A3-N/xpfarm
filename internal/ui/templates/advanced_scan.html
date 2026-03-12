@@ -1,39 +1,42 @@
-{{define "title"}}Advanced Scan Settings - {{.Asset.Name}} - XPFarm{{end}}
+{{define "title"}}Nuclei Templates - {{.Asset.Name}} - XPFarm{{end}}
 {{template "layout.html" .}}
 {{define "content"}}
 <div style="margin-bottom: 20px;">
     <a href="/asset/{{.Asset.ID}}" style="color: var(--color-muted); text-decoration: none;">&larr; Back to Asset</a>
 </div>
 
+<form id="advanced-scan-form" action="/asset/{{.Asset.ID}}/advanced/save" method="POST">
+
 <div class="card" style="margin-bottom: 20px;">
     <div style="display: flex; justify-content: space-between; align-items: start;">
         <div>
-            <h1 style="margin-bottom: 5px;">Advanced Config: {{.Asset.Name}}</h1>
-            <p style="color: var(--color-muted); font-size: 0.9rem; margin: 0;">Configure specific Nuclei templates to
-                run during the scan.</p>
+            <h1 style="margin-bottom: 5px;">Nuclei Templates: {{.Asset.Name}}</h1>
+            <p style="color: var(--color-muted); font-size: 0.9rem; margin: 0;">Select specific Nuclei templates to
+                run during vulnerability scanning.</p>
         </div>
         <div style="text-align: right; display: flex; align-items: center; gap: 15px;">
             <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 0.95rem;">Advanced Scan</span>
+                <span style="font-size: 0.95rem;">Enabled</span>
                 <label class="switch">
-                    <input type="checkbox" id="enable-advanced-scan" form="advanced-scan-form" name="enable_advanced"
+                    <input type="checkbox" id="enable-advanced-scan" name="enable_advanced"
                         onchange="toggleFormState()" {{if .Asset.AdvancedMode}}checked{{end}}>
                     <span class="slider"></span>
                 </label>
             </div>
 
-            <form id="advanced-scan-form" action="/asset/{{.Asset.ID}}/advanced/save" method="POST" style="margin: 0;">
-                <button type="submit" id="start-scan-btn" class="btn btn-primary"
-                    style="padding: 5px 15px; font-size: 0.9rem;">Save Configuration</button>
-            </form>
+            <button type="submit" id="start-scan-btn" class="btn btn-primary"
+                style="padding: 5px 15px; font-size: 0.9rem;">Save Configuration</button>
         </div>
     </div>
+    <p style="color: #f59e0b; font-size: 0.85rem; margin-top: 10px; margin-bottom: 0;">
+        &#9888; When enabled, <strong>only</strong> the selected Nuclei templates below will be executed during vulnerability scans &mdash; the default automatic scan logic will be skipped entirely.
+    </p>
 </div>
 
 <div class="tabs" style="margin-bottom: 20px; border-bottom: 1px solid var(--border-color);" id="template-tabs">
     {{$first := true}}
     {{range .Tabs}}
-    <button class="tab-btn {{if $first}}active{{end}}" onclick="showTab(event, 'tab-folder-{{.Name}}')"
+    <button type="button" class="tab-btn {{if $first}}active{{end}}" onclick="showTab(event, 'tab-folder-{{.Name}}')"
         {{$first = false}}>
         {{.Name}} <span class="badge" style="background:var(--bg-hover); color:white;">{{.TotalCount}}</span>
     </button>
@@ -70,7 +73,7 @@
                         <td style="width: 60px; text-align: center;">
                             <label class="switch" style="margin: 0;">
                                 <input type="checkbox" class="template-checkbox folder-{{$folderName}}"
-                                    name="templates[]" value="{{.TemplateID}}" form="advanced-scan-form" {{if index
+                                    name="templates[]" value="{{.TemplateID}}" {{if index
                                     $.SelectedMap .TemplateID}}checked{{end}} disabled>
                                 <span class="slider"></span>
                             </label>
@@ -88,6 +91,8 @@
     {{$firstTab = false}}
     {{end}}
 </div>
+
+</form>
 
 <style>
     .tab-btn {
@@ -188,7 +193,6 @@
         const isEnabled = document.getElementById('enable-advanced-scan').checked;
         const checkboxes = document.querySelectorAll('.template-checkbox');
         const selectAllBtns = document.querySelectorAll('.select-all-btn, .select-all-sub-btn');
-        const startScanBtn = document.getElementById('start-scan-btn');
         const templatesContainer = document.getElementById('templates-container');
 
         checkboxes.forEach(cb => cb.disabled = !isEnabled);

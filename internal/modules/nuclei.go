@@ -103,6 +103,17 @@ func (n *Nuclei) RunSSLScan(ctx context.Context, target string) (string, error) 
 	return n.RunRaw(ctx, []string{"-u", target, "-pt", "ssl", "-jsonl", "-silent"})
 }
 
+// RunWorkflow runs nuclei against a target using a workflow YAML file.
+// This is used when the user has selected specific templates in the Nuclei Templates page.
+func (n *Nuclei) RunWorkflow(ctx context.Context, target string, workflowPath string) (string, error) {
+	return n.RunRaw(ctx, []string{"-u", target, "-w", workflowPath, "-jsonl", "-silent"})
+}
+
+// RunWorkflowFile runs nuclei against a list file using a workflow YAML file.
+func (n *Nuclei) RunWorkflowFile(ctx context.Context, urlsFile string, workflowPath string) (string, error) {
+	return n.RunRaw(ctx, []string{"-l", urlsFile, "-w", workflowPath, "-jsonl", "-silent"})
+}
+
 // NucleiResult represents a single finding from nuclei JSONL output.
 type NucleiResult struct {
 	TemplateID string `json:"template-id"`

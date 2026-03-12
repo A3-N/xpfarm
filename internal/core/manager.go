@@ -207,6 +207,16 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 	}
 	db.Model(&targetObj).Update("updated_at", time.Now())
 
+	// === ENABLED MODE SHORT-CIRCUIT ===
+	// When AdvancedMode (Nuclei Templates → Enabled) is on, skip the entire
+	// default pipeline and ONLY run the selected nuclei templates.
+	if asset.AdvancedMode && asset.AdvancedTemplates != "" {
+		utils.LogInfo("[Scanner] Enabled mode active for asset %s — skipping default pipeline, running nuclei templates only on %s", assetName, hostname)
+		sm.runNucleiScan(ctx, db, targetObj)
+		utils.LogSuccess("[Scanner] Enabled mode pipeline completed for %s", hostname)
+		return
+	}
+
 	// === STAGE 1: Subdomain Discovery (Subfinder — Synchronous) ===
 	utils.LogInfo("[Scanner] Stage 1: Running Subfinder on %s", hostname)
 	var subdomains []string
@@ -950,7 +960,117 @@ func (sm *ScanManager) runNucleiScan(ctx context.Context, db *gorm.DB, targetObj
 		return
 	}
 
-	// Build the scan plan
+	// Check if this asset has Enabled mode (template-only scan)
+	var asset database.Asset
+	db.First(&asset, targetObj.AssetID)
+
+	if asset.AdvancedMode && asset.AdvancedTemplates != "" {
+		// ENABLED MODE: Run only the selected templates via a nuclei workflow file
+		templateIDs := strings.Split(asset.AdvancedTemplates, ",")
+		var cleanIDs []string
+		for _, id := range templateIDs {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				cleanIDs = append(cleanIDs, id)
+			}
+		}
+
+		if len(cleanIDs) == 0 {
+			utils.LogWarning("[Scanner] [Nuclei] Enabled mode but no templates selected for %s", targetObj.Value)
+			return
+		}
+
+		// Look up FilePath from the DB index for each selected template ID
+		var dbTemplates []database.NucleiTemplate
+		db.Where("template_id IN ?", cleanIDs).Find(&dbTemplates)
+
+		if len(dbTemplates) == 0 {
+			utils.LogWarning("[Scanner] [Nuclei] Enabled mode: no template files found in index for %d IDs on %s", len(cleanIDs), targetObj.Value)
+			return
+		}
+
+		// Generate a temp workflow YAML file
+		var workflowLines []string
+		workflowLines = append(workflowLines, "id: xpfarm-custom-scan")
+		workflowLines = append(workflowLines, "info:")
+		workflowLines = append(workflowLines, "  name: XPFarm Custom Scan")
+		workflowLines = append(workflowLines, "  author: xpfarm")
+		workflowLines = append(workflowLines, "  severity: info")
+		workflowLines = append(workflowLines, "")
+		workflowLines = append(workflowLines, "workflows:")
+
+		for _, t := range dbTemplates {
+			if t.FilePath != "" {
+				// Use forward slashes for nuclei compatibility
+				fwdPath := strings.ReplaceAll(t.FilePath, "\\", "/")
+				workflowLines = append(workflowLines, fmt.Sprintf("  - template: %s", fwdPath))
+			}
+		}
+
+		tmpFile, tmpErr := os.CreateTemp("", "nuclei-workflow-*.yaml")
+		if tmpErr != nil {
+			utils.LogError("[Scanner] [Nuclei] Failed to create workflow file: %v", tmpErr)
+			return
+		}
+		workflowPath := tmpFile.Name()
+		defer os.Remove(workflowPath)
+
+		workflowContent := strings.Join(workflowLines, "\n")
+		if _, writeErr := tmpFile.WriteString(workflowContent); writeErr != nil {
+			tmpFile.Close()
+			utils.LogError("[Scanner] [Nuclei] Failed to write workflow file: %v", writeErr)
+			return
+		}
+		tmpFile.Close()
+
+		utils.LogInfo("[Scanner] [Nuclei] Generated workflow with %d templates at %s", len(dbTemplates), workflowPath)
+		utils.LogDebug("[Scanner] [Nuclei] Workflow content:\n%s", workflowContent)
+		totalFindings := 0
+
+		// Run against each web URL
+		for _, wa := range webAssets {
+			if ctx.Err() != nil {
+				return
+			}
+			if wa.URL == "" {
+				continue
+			}
+			utils.LogInfo("[Scanner] [Nuclei] Enabled scan on %s with %d templates (workflow)", wa.URL, len(dbTemplates))
+			output, err := nm.RunWorkflow(ctx, wa.URL, workflowPath)
+			if output != "" {
+				recordResult(db, targetObj.ID, "nuclei", fmt.Sprintf("Enabled scan [%d templates] %s\n%s", len(dbTemplates), wa.URL, output))
+			}
+			if err != nil {
+				utils.LogDebug("[Scanner] [Nuclei] Enabled scan error for %s: %v", wa.URL, err)
+			}
+			count := sm.parseAndStoreNucleiResults(db, targetObj.ID, output)
+			totalFindings += count
+		}
+
+		// Run against network targets (host:port for non-web services)
+		for _, p := range ports {
+			if ctx.Err() != nil {
+				return
+			}
+			hostPort := fmt.Sprintf("%s:%d", targetObj.Value, p.Port)
+			output, err := nm.RunWorkflow(ctx, hostPort, workflowPath)
+			if output != "" {
+				recordResult(db, targetObj.ID, "nuclei", fmt.Sprintf("Enabled scan [%d templates] %s\n%s", len(dbTemplates), hostPort, output))
+			}
+			if err != nil {
+				utils.LogDebug("[Scanner] [Nuclei] Enabled scan error for %s: %v", hostPort, err)
+			}
+			count := sm.parseAndStoreNucleiResults(db, targetObj.ID, output)
+			totalFindings += count
+		}
+
+		if totalFindings > 0 {
+			utils.LogSuccess("[Scanner] [Nuclei] Enabled mode found %d vulnerabilities for %s", totalFindings, targetObj.Value)
+		}
+		return
+	}
+
+	// DEFAULT MODE: Use the existing tag-based scan plan
 	plan := BuildNucleiPlan(targetObj.Value, ports, webAssets)
 	totalFindings := 0
 

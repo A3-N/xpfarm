@@ -28,7 +28,6 @@ docker run -p 8888:8888 -v $(pwd)/data:/app/data -v $(pwd)/screenshots:/app/scre
 
 ## TODO
 
-- [ ] Vuln scan nuclei only
 - [ ] Agent Hell
 
 ### NTH

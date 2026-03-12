@@ -23,10 +23,6 @@
         <div style="text-align: right;">
             <p style="margin: 0; color: var(--color-muted); font-size: 0.8rem;">Last Scanned</p>
             <p style="margin: 0; font-family: monospace;">{{.Target.UpdatedAt.Format "Jan 02, 15:04"}}</p>
-            <form action="/target/{{.Target.ID}}/scan" method="POST" style="margin-top: 10px;">
-                <button type="submit" class="btn btn-primary" style="padding: 5px 15px; font-size: 0.9rem;">Scan
-                    Now</button>
-            </form>
         </div>
     </div>
 </div>
