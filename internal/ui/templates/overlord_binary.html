@@ -554,6 +554,7 @@
     const STORAGE_KEY = 'overlord_last_session';
     let activityCounter = 0;
     let savedModel = '{{.ActiveModel}}';
+    const enabledProvidersList = '{{.EnabledProviders}}'.split(',').filter(Boolean);
 
     // --- Model Selector ---
     async function loadModels() {
@@ -563,18 +564,23 @@
             if (!resp.ok) throw new Error('offline');
             const data = await resp.json();
             const connected = data.connected || [];
-            const providers = (data.all || []).filter(p => connected.includes(p.id));
+
+            // Filter: must be connected AND (enabled by user OR no enabled list saved yet)
+            const hasEnabledList = enabledProvidersList.length > 0;
+            const providers = (data.all || []).filter(p =>
+                connected.includes(p.id) && (!hasEnabledList || enabledProvidersList.includes(p.id))
+            );
 
             select.innerHTML = '';
             if (providers.length === 0) {
-                select.innerHTML = '<option value="">No providers connected</option>';
+                select.innerHTML = '<option value="">No providers enabled</option>';
                 return;
             }
 
             // Add default option
             const defaultOpt = document.createElement('option');
             defaultOpt.value = '';
-            defaultOpt.textContent = '⚡ Auto (server default)';
+            defaultOpt.textContent = '\u26a1 Auto (server default)';
             select.appendChild(defaultOpt);
 
             providers.forEach(provider => {

@@ -403,12 +403,20 @@ func StartServer(port string) error {
 			activeModel = modelSetting.Value
 		}
 
+		// Get enabled providers
+		enabledProviders := ""
+		var epSetting database.Setting
+		if database.GetDB().Where("key = ?", "OVERLORD_ENABLED_PROVIDERS").First(&epSetting).Error == nil {
+			enabledProviders = epSetting.Value
+		}
+
 		c.HTML(http.StatusOK, "overlord_binary.html", getGlobalContext(gin.H{
-			"Page":        "overlord",
-			"Connection":  status,
-			"Binaries":    binaries,
-			"Outputs":     outputs,
-			"ActiveModel": activeModel,
+			"Page":             "overlord",
+			"Connection":       status,
+			"Binaries":         binaries,
+			"Outputs":          outputs,
+			"ActiveModel":      activeModel,
+			"EnabledProviders": enabledProviders,
 		}))
 	})
 
@@ -546,6 +554,71 @@ func StartServer(port string) error {
 			DoUpdates: clause.AssignmentColumns([]string{"value", "description", "updated_at", "deleted_at"}),
 		}).Create(&s)
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// Save AI provider keys via JSON API
+	r.POST("/api/overlord/providers/save", func(c *gin.Context) {
+		var body struct {
+			Keys []struct {
+				ProviderID string `json:"providerID"`
+				EnvKey     string `json:"envKey"`
+				Value      string `json:"value"`
+			} `json:"keys"`
+			EnabledProviders []string `json:"enabledProviders"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		db := database.GetDB()
+		authKeys := make(map[string]string)
+
+		for _, k := range body.Keys {
+			if k.EnvKey == "" || k.Value == "" {
+				continue
+			}
+			// Save to DB
+			var s database.Setting
+			s.Key = k.EnvKey
+			s.Value = k.Value
+			s.Description = k.ProviderID + " API Key"
+			db.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "key"}},
+				DoUpdates: clause.AssignmentColumns([]string{"value", "description", "updated_at", "deleted_at"}),
+			}).Create(&s)
+			os.Setenv(k.EnvKey, k.Value)
+			authKeys[k.EnvKey] = k.Value
+
+			// Set auth on OpenCode server
+			overlord.SetAuth(k.ProviderID, k.Value)
+		}
+
+		// Save enabled providers list
+		if body.EnabledProviders != nil {
+			var s database.Setting
+			s.Key = "OVERLORD_ENABLED_PROVIDERS"
+			s.Value = strings.Join(body.EnabledProviders, ",")
+			s.Description = "Enabled AI providers"
+			db.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "key"}},
+				DoUpdates: clause.AssignmentColumns([]string{"value", "description", "updated_at", "deleted_at"}),
+			}).Create(&s)
+		}
+
+		// Write auth file
+		if len(authKeys) > 0 {
+			var allSettings []database.Setting
+			db.Find(&allSettings)
+			allKeys := make(map[string]string)
+			for _, s := range allSettings {
+				allKeys[s.Key] = s.Value
+			}
+			overlord.WriteAuthFile(allKeys)
+		}
+
+		overlord.InvalidateProviderCache()
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "saved": len(authKeys)})
 	})
 
 	// AI Provider Settings

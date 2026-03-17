@@ -37,7 +37,7 @@
                     value='{{range .Settings}}{{if eq .Key `DISCORD_TOKEN`}}{{.Value}}{{end}}{{end}}'
                     style="width: 100%; padding: 10px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none;">
             </div>
-            <button type="submit" class="btn btn-primary" style="align-self: flex-start;">Save & Restart Bot</button>
+            <button type="submit" class="btn btn-primary" style="align-self: flex-start;">Save &amp; Restart Bot</button>
         </form>
     </div>
 
@@ -74,10 +74,6 @@
         </form>
     </div>
 </div>
-
-
-
-
 
 <div id="env-section" class="settings-section" style="display: none;">
     <div class="card">
@@ -151,82 +147,221 @@
             </tbody>
         </table>
     </div>
-
-
 </div>
 
 <div id="ai-section" class="settings-section" style="display: none;">
+    <style>
+        .ai-status { padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; }
+        .ai-status.online { background: rgba(16,185,129,0.08); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
+        .ai-status.offline { background: rgba(239,68,68,0.08); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
+        .ai-status .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .ai-status.online .dot { background: #10b981; }
+        .ai-status.offline .dot { background: #ef4444; }
+        .ai-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+        .ai-provider-card {
+            background: var(--bg-hover); border: 1px solid var(--border-color);
+            border-radius: 10px; padding: 18px; transition: border-color 0.2s, box-shadow 0.2s;
+            overflow: hidden;
+        }
+        .ai-provider-card.connected {
+            border-color: rgba(16,185,129,0.35); box-shadow: 0 0 12px rgba(16,185,129,0.06);
+        }
+        .ai-provider-card .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+        .ai-provider-card .title { font-weight: 600; font-size: 0.95rem; }
+        .ai-provider-card .model-count { font-size: 0.75rem; color: var(--color-muted); margin-top: 4px; }
+        .ai-toggle { position: relative; width: 38px; height: 20px; flex-shrink: 0; }
+        .ai-toggle input { opacity: 0; width: 0; height: 0; }
+        .ai-toggle .slider {
+            position: absolute; inset: 0; background: #333; border-radius: 20px; cursor: pointer; transition: background 0.2s;
+        }
+        .ai-toggle .slider::before {
+            content: ''; position: absolute; height: 14px; width: 14px;
+            left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: transform 0.2s;
+        }
+        .ai-toggle input:checked + .slider { background: #10b981; }
+        .ai-toggle input:checked + .slider::before { transform: translateX(18px); }
+        .ai-key-row { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+        .ai-key-input {
+            width: 100%; padding: 8px 12px; background: #050505; border: 1px solid var(--border-color);
+            border-radius: 6px; color: white; font-size: 0.82rem; outline: none; font-family: monospace;
+            box-sizing: border-box;
+        }
+        .ai-key-input:focus { border-color: var(--color-primary); }
+        .ai-key-input::placeholder { color: #555; }
+        .ai-key-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+        .ai-key-label {
+            font-family: monospace; font-size: 0.72rem; color: #a78bfa;
+            background: rgba(139,92,246,0.1); padding: 2px 7px; border-radius: 4px;
+        }
+        .ai-key-saved { font-size: 0.7rem; color: #10b981; white-space: nowrap; }
+        .ai-badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 500;
+        }
+        .ai-badge.connected { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.25); }
+        .ai-badge.free { background: rgba(139,92,246,0.12); color: #a78bfa; border: 1px solid rgba(139,92,246,0.25); }
+        .ai-loading { text-align: center; padding: 40px; color: var(--color-muted); font-size: 0.9rem; }
+        .ai-save-msg { font-size: 0.82rem; display: none; }
+    </style>
+
     <div class="card">
-        <h2>AI Provider Configuration</h2>
-        <p style="color: var(--color-muted); margin-bottom: 20px;">Configure API keys for the Overlord AI agent. Select one active provider.</p>
-
-        <!-- Saved Keys Table -->
-        <h3 style="margin-bottom: 10px;">Saved API Keys</h3>
-        <table style="margin-bottom: 25px;">
-            <thead>
-                <tr>
-                    <th>Key</th>
-                    <th>Value</th>
-                    <th>Provider</th>
-                    <th style="width: 80px;">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {{range .Settings}}
-                {{if or (eq .Key "ANTHROPIC_API_KEY") (eq .Key "OPENAI_API_KEY") (eq .Key "OPENCODE_API_KEY") (eq .Key "AZURE_API_KEY") (eq .Key "GROQ_API_KEY") (eq .Key "DEEPSEEK_API_KEY") (eq .Key "OPENROUTER_API_KEY") (eq .Key "XAI_API_KEY") (eq .Key "FIREWORKS_API_KEY") (eq .Key "TOGETHER_API_KEY") (eq .Key "DEEPINFRA_API_KEY") (eq .Key "MINIMAX_API_KEY") (eq .Key "CEREBRAS_API_KEY") (eq .Key "MOONSHOT_API_KEY") (eq .Key "NEBIUS_API_KEY") (eq .Key "ZAI_API_KEY") (eq .Key "CLOUDFLARE_API_TOKEN") (eq .Key "VERCEL_API_KEY")}}
-                <tr>
-                    <td style="font-family: monospace; color: var(--color-primary);">{{.Key}}</td>
-                    <td>••••••••••••</td>
-                    <td>{{.Description}}</td>
-                    <td>
-                        <form action="/settings/delete" method="POST" onsubmit="return confirm('Delete {{.Key}}?');" style="margin: 0;">
-                            <input type="hidden" name="key" value="{{.Key}}">
-                            <button type="submit" class="badge" style="background: none; border: 1px solid #ef4444; color: #ef4444; cursor: pointer;">Del</button>
-                        </form>
-                    </td>
-                </tr>
-                {{end}}
-                {{end}}
-            </tbody>
-        </table>
-
-        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 25px 0;">
-
-        <form action="/settings/ai" method="POST"
-            style="display: flex; flex-direction: column; gap: 20px; margin-bottom: 20px;">
-
-            <button type="submit" class="btn btn-primary" style="align-self: flex-start;">Save Provider Settings</button>
-
-            {{range .Providers}}
-            <div style="padding: 15px; background: var(--bg-hover); border: 1px solid var(--border-color); border-radius: 8px;">
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
-                    <input type="radio" name="active_provider" value="{{.ID}}"
-                        id="provider-{{.ID}}"
-                        {{if eq $.ActiveProvider .ID}}checked{{end}}
-                        style="accent-color: var(--color-primary); width: 16px; height: 16px; cursor: pointer;">
-                    <label for="provider-{{.ID}}" style="font-weight: 600; cursor: pointer;">{{.Name}}</label>
-                    {{if .HasFree}}
-                    <span class="badge" style="background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); font-size: 0.7rem;">FREE TIER</span>
-                    {{end}}
-                </div>
-                <p style="color: var(--color-muted); font-size: 0.8rem; margin: 0 0 10px 28px;">{{.Description}}</p>
-                {{if .EnvKeys}}
-                <div style="margin-left: 28px; display: flex; flex-direction: column; gap: 8px;">
-                    {{range .EnvKeys}}
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <label style="font-family: monospace; font-size: 0.8rem; color: var(--color-primary); min-width: 220px;">{{.}}</label>
-                        <input type="password" name="{{.}}" placeholder="••••••••" autocomplete="off"
-                            style="flex: 1; padding: 8px 12px; background-color: #050505; border: 1px solid var(--border-color); border-radius: 6px; color: white; outline: none; font-size: 0.85rem;">
-                    </div>
-                    {{end}}
-                </div>
-                {{else}}
-                <p style="margin: 0 0 0 28px; color: var(--color-muted); font-size: 0.8rem; font-style: italic;">No API key required</p>
-                {{end}}
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+            <div>
+                <h2 style="margin-bottom: 6px;">AI Providers</h2>
+                <p style="color: var(--color-muted); margin: 0; font-size: 0.88rem;">Enable providers and add API keys. Connected providers appear in the model selector.</p>
             </div>
-            {{end}}
-        </form>
+            <div id="ai-toolbar" style="display: none; flex-shrink: 0;">
+                <span class="ai-save-msg" id="ai-save-msg"></span>
+                <button class="btn btn-primary" onclick="saveAISettings()" id="ai-save-btn">Save Settings</button>
+            </div>
+        </div>
+
+        <div id="ai-connection-status"></div>
+        <div id="ai-provider-list" class="ai-loading">Loading providers...</div>
     </div>
+
+    <script>
+    const savedEnvKeys = new Set();
+    let savedEnabledProviders = null;
+    {{range .Settings}}savedEnvKeys.add('{{.Key}}');
+    {{if eq .Key "OVERLORD_ENABLED_PROVIDERS"}}savedEnabledProviders = '{{.Value}}'.split(',').filter(Boolean);{{end}}
+    {{end}}
+
+    (async function loadAIProviders() {
+        const list = document.getElementById('ai-provider-list');
+        const statusEl = document.getElementById('ai-connection-status');
+        const toolbar = document.getElementById('ai-toolbar');
+
+        let providerData = null;
+        try {
+            const resp = await fetch('/api/overlord/providers');
+            if (resp.ok) {
+                providerData = await resp.json();
+                statusEl.innerHTML = '<div class="ai-status online"><div class="dot"></div> Overlord connected — ' + (providerData.all || []).length + ' providers available</div>';
+            } else { throw new Error('offline'); }
+        } catch (e) {
+            statusEl.innerHTML = '<div class="ai-status offline"><div class="dot"></div> Overlord offline — start the container to manage providers</div>';
+            list.innerHTML = '<div class="ai-loading">No providers available. Make sure the Overlord container is running.</div>';
+            return;
+        }
+
+        const providers = providerData.all || [];
+        const connected = providerData.connected || [];
+
+        if (providers.length === 0) { list.innerHTML = '<div class="ai-loading">No providers found.</div>'; return; }
+
+        providers.sort((a, b) => {
+            const ac = connected.includes(a.id) ? 0 : 1;
+            const bc = connected.includes(b.id) ? 0 : 1;
+            if (ac !== bc) return ac - bc;
+            return (a.name || a.id).localeCompare(b.name || b.id);
+        });
+
+        let html = '<div class="ai-grid">';
+        providers.forEach(p => {
+            const isConnected = connected.includes(p.id);
+            const modelCount = p.models ? Object.keys(p.models).length : 0;
+            const envKeys = p.env || [];
+            const noKeyNeeded = envKeys.length === 0;
+
+            const isEnabled = savedEnabledProviders
+                ? savedEnabledProviders.includes(p.id)
+                : connected.includes(p.id);
+
+            html += `<div class="ai-provider-card ${isConnected ? 'connected' : ''}" data-provider="${p.id}">
+                <div class="head">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <label class="ai-toggle">
+                            <input type="checkbox" data-pid="${p.id}" ${isEnabled ? 'checked' : ''} onchange="markDirty()">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="title">${p.name || p.id}</span>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        ${isConnected ? '<span class="ai-badge connected">● Connected</span>' : ''}
+                        ${noKeyNeeded ? '<span class="ai-badge free">Free</span>' : ''}
+                    </div>
+                </div>`;
+
+            if (modelCount > 0) {
+                const toolModels = Object.values(p.models).filter(m => m.capabilities && m.capabilities.toolcall).length;
+                html += `<div class="model-count">${modelCount} model${modelCount !== 1 ? 's' : ''} available${toolModels > 0 ? ' · ' + toolModels + ' with tool calling' : ''}</div>`;
+            }
+
+            if (envKeys.length > 0) {
+                envKeys.forEach(k => {
+                    const hasSaved = savedEnvKeys.has(k);
+                    html += `<div class="ai-key-row">
+                        <div class="ai-key-meta">
+                            <span class="ai-key-label">${k}</span>
+                            ${hasSaved ? '<span class="ai-key-saved">● saved</span>' : ''}
+                        </div>
+                        <input type="password" class="ai-key-input" data-env="${k}" data-pid="${p.id}"
+                            placeholder="${hasSaved ? '••••••••  (saved)' : 'Enter API key...'}" autocomplete="off" oninput="markDirty()">
+                    </div>`;
+                });
+            }
+
+            html += '</div>';
+        });
+        html += '</div>';
+
+        list.innerHTML = html;
+        toolbar.style.display = 'flex';
+    })();
+
+    function markDirty() {
+        document.getElementById('ai-save-msg').style.display = 'none';
+    }
+
+    async function saveAISettings() {
+        const btn = document.getElementById('ai-save-btn');
+        const msg = document.getElementById('ai-save-msg');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        msg.style.display = 'none';
+
+        const keys = [];
+        document.querySelectorAll('.ai-key-input').forEach(input => {
+            const val = input.value.trim();
+            if (val) {
+                keys.push({ providerID: input.dataset.pid, envKey: input.dataset.env, value: val });
+            }
+        });
+
+        // Collect enabled provider IDs from toggles
+        const enabledProviders = [];
+        document.querySelectorAll('.ai-toggle input[type=checkbox]').forEach(t => {
+            if (t.checked) enabledProviders.push(t.dataset.pid);
+        });
+
+        try {
+            const resp = await fetch('/api/overlord/providers/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keys, enabledProviders })
+            });
+            const result = await resp.json();
+            if (resp.ok) {
+                const parts = [];
+                if (result.saved > 0) parts.push(result.saved + ' key(s)');
+                parts.push('providers updated');
+                msg.textContent = '✓ ' + parts.join(', ');
+                msg.style.color = '#10b981';
+                msg.style.display = 'inline';
+                setTimeout(() => location.reload(), 800);
+            } else {
+                throw new Error(result.error || 'Save failed');
+            }
+        } catch (e) {
+            msg.textContent = '✗ ' + e.message;
+            msg.style.color = '#ef4444';
+            msg.style.display = 'inline';
+        }
+        btn.disabled = false;
+        btn.textContent = 'Save Settings';
+    }
+    </script>
 </div>
 
 <script>
