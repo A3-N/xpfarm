@@ -12,45 +12,44 @@ banner() {
     echo -e "\033[38;2;80;130;190m  \u2571     \u2572  \u2502    \u2502    \u2502     \u2572   \u2571 __ \u2572\u2502  \u2502 \u2572\u2571  y y  \u2572\033[0m"
     echo -e "\033[38;2;48;158;163m \u2571___\u2571\u2572  \u2572 \u2502____\u2502    \u2572___  \u2571  (____  \u2571__\u2502  \u2502__\u2502_\u2502  \u2571\033[0m"
     echo -e "\033[38;2;16;185;129m       \u2572_\u2571               \u2572\u2571        \u2572\u2571            \u2572\u2571 \033[0m"
-    echo -e "\033[38;2;16;185;129m                                        github.com/A3-N\033[0m"
+    echo -e "\033[38;2;16;185;129m                                    github.com/A3-N\033[0m"
     echo ""
 }
 
 require_docker() {
     if ! command -v docker &> /dev/null; then
-        echo -e "\033[0;31mError: Docker is not installed\033[0m"
+        echo -e "\033[1;31mError: Docker is not installed\033[0m"
         exit 1
     fi
 }
 
-load_env() {
-    if [ -f .env ]; then
-        echo "Loading environment variables from .env..."
-        set -a
-        source .env
-        set +a
-    fi
-}
 
 cmd_build() {
     require_docker
     banner
-    load_env
-    echo -e "\033[1;33mBuilding XPFarm + Overlord containers...\033[0m"
+    echo -e "\033[1mBuilding XPFarm + Overlord containers...\033[0m"
     docker compose build
     echo ""
-    echo -e "\033[0;32mBuild complete!\033[0m Run ./xpfarm.sh up to start."
+    echo -e "\033[1;32mBuild complete!\033[0m Run \033[1m./xpfarm.sh up\033[0m to start."
 }
 
 cmd_up() {
     require_docker
     banner
-    load_env
-    echo -e "\033[1;33mStarting XPFarm + Overlord...\033[0m"
+
+    # Ensure data directory exists
+    mkdir -p data
+
+    echo -e "\033[1mStarting XPFarm + Overlord...\033[0m"
     docker compose up -d
 
+    echo -e "\033[1mWaiting for XPFarm web UI to be ready...\033[0m"
+    while ! curl -s http://localhost:8888/ > /dev/null; do
+        sleep 2
+    done
+
     echo ""
-    echo -e "\033[0;32mEnvironment is running!\033[0m"
+    echo -e "\033[1;32mEnvironment is running and web UI is ready!\033[0m"
     echo -e "  XPFarm:   \033[1mhttp://localhost:8888\033[0m"
     echo -e "  Overlord: \033[1mRunning (internal)\033[0m"
     echo ""
@@ -59,20 +58,20 @@ cmd_up() {
 
 cmd_onlygo() {
     banner
-    echo -e "\033[1;33mBuilding XPFarm (Go native, no Docker)...\033[0m"
-    echo -e "\033[1;33mNote: Overlord features require Docker.\033[0m"
+    echo -e "\033[1mBuilding XPFarm (Go native, no Docker)...\033[0m"
+    echo -e "\033[1mNote: Overlord features require Docker.\033[0m"
     echo ""
 
     go build -o xpfarm main.go
-    echo -e "\033[0;32mBuild complete. Starting...\033[0m"
+    echo -e "\033[1;32mBuild complete. Starting...\033[0m"
     ./xpfarm "$@"
 }
 
 cmd_down() {
     require_docker
-    echo -e "\033[1;33mStopping all containers...\033[0m"
+    echo -e "\033[1mStopping all containers...\033[0m"
     docker compose down
-    echo -e "\033[0;32mEnvironment stopped.\033[0m"
+    echo -e "\033[1;32mEnvironment stopped.\033[0m"
 }
 
 cmd_help() {
@@ -87,9 +86,9 @@ cmd_help() {
     echo -e "  \033[1mhelp\033[0m        Show this help message"
     echo ""
     echo "Examples:"
-    echo -e "  ./xpfarm.sh build        \033[0;32m# Build containers\033[0m"
-    echo -e "  ./xpfarm.sh up           \033[0;32m# Start full stack\033[0m"
-    echo -e "  ./xpfarm.sh onlyGo       \033[0;32m# Dev mode, Go only\033[0m"
+    echo -e "  ./xpfarm.sh build        # Build containers"
+    echo -e "  ./xpfarm.sh up           # Start full stack"
+    echo -e "  ./xpfarm.sh onlyGo       # Dev mode, Go only"
 }
 
 case "${1:-help}" in

@@ -34,9 +34,15 @@ screenshots/
 .screenshots/
 *.txt
 *.py
+.env
 
 # Overlord
-overlord/binaries/
-overlord/output/
+overlord/binaries/*
+!overlord/binaries/.gitkeep
+overlord/output/*
+!overlord/output/.gitkeep
 overlord/auth.json
 binaryagent-main/
+
+# Data
+data/

@@ -101,9 +101,6 @@ COPY config/opencode.json /root/.config/opencode/opencode.json
 # Copy custom tools
 COPY tools/ /root/.config/opencode/tools/
 
-# Copy agent prompts
-COPY agents/ /root/.config/opencode/agents/
-
 # Copy YARA rules to expected location
 COPY tools/yara-rules/ /opt/yara-rules/
 

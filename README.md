@@ -25,7 +25,16 @@ The focus was on building a vuln scanner where you can also see what fails or ge
 
 ![Discovery Paths](img/Disc_Paths.png)
 
-## Overlord — AI Binary Analysis
+## Overlord - AI Binary Analysis
+
+#### Credits
+
+<a href="https://github.com/Asjidkalam">
+  <img src="https://github.com/Asjidkalam.png" width="50" style="border-radius:50%" alt="Asjidkalam"/>
+</a>
+<a href="https://github.com/jamoski3112">
+  <img src="https://github.com/jamoski3112.png" width="50" style="border-radius:50%" alt="jamoski3112"/>
+</a>
 
 Overlord is a built-in AI agent powered by [OpenCode](https://opencode.ai) that can analyze binaries, archives, and other files. Upload a binary and chat with it — the agent uses tools like radare2, strings, file triage, and more to investigate your target.
 
@@ -68,9 +77,9 @@ go build -o xpfarm
 
 ## TODO
 
-- [x] Agent Hell (Overlord)
+- [ ] custom model
 
-### NTH
+### TODO
 - [ ] SecretFinder JS
 - [ ] Repo detect/scan
 - [ ] Mobile scan

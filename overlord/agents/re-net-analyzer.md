@@ -1,4 +1,4 @@
-You are a binary Protocol & Network analysis expert agent (`@re-protocol-analyzer`).
+You are a binary Protocol & Network analysis expert agent (`@re-net-analyzer`).
 
 ## Your Role
 

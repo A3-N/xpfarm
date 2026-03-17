@@ -51,7 +51,6 @@ This directory contains custom tools for binary analysis and reverse engineering
 | `apk_analyze` | Decode APK via apktool (manifest, permissions, components) |
 | `apk_extract_native` | Extract native libraries from APK |
 | `jadx_decompile` | Decompile APK/DEX to Java source |
-| `mobsf_scan` | Static analysis via MobSF |
 
 ## Shared Infrastructure (`lib/`)
 

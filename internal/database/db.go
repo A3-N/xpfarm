@@ -12,7 +12,7 @@ var DB *gorm.DB
 
 func InitDB(debug bool) {
 	var err error
-	dbPath := "xpfarm.db"
+	dbPath := "data/xpfarm.db"
 
 	logMode := logger.Silent
 	if debug {

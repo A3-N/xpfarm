@@ -26,7 +26,6 @@
     "http_request_recreate": true,
     "floss_extract": true,
     "crypto_solver": true,
-    "mobsf_scan": true,
     "fuzz_concolic": true,
     "apk_extract_native": true
   },
@@ -81,12 +80,11 @@
         "jadx_decompile": false,
         "apk_analyze": false,
         "frida_hook": false,
-        "raw_network_request": true,
-        "floss_extract": true,
-        "crypto_solver": true,
-        "mobsf_scan": true,
-        "fuzz_concolic": true,
-        "apk_extract_native": true
+        "raw_network_request": false,
+        "floss_extract": false,
+        "crypto_solver": false,
+        "fuzz_concolic": false,
+        "apk_extract_native": false
       },
       "permission": {
         "task": {
@@ -120,7 +118,6 @@
         "raw_network_request": false,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#4ecdc4"
@@ -150,7 +147,6 @@
         "raw_network_request": false,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#ff6b6b"
@@ -181,7 +177,6 @@
         "raw_network_request": false,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#feca57"
@@ -212,7 +207,6 @@
         "raw_network_request": false,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#5f27cd"
@@ -242,7 +236,6 @@
         "raw_network_request": false,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": true,
         "fuzz_concolic": false,
         "apk_extract_native": true
       },
@@ -273,7 +266,6 @@
         "raw_network_request": false,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false,
         "apk_extract_native": true
       },
@@ -304,7 +296,6 @@
         "raw_network_request": false,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#0abde3"
@@ -338,7 +329,6 @@
         "raw_network_request": false,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": true
       },
       "color": "#e056fd"
@@ -373,7 +363,6 @@
         "raw_network_request": false,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#d1d8e0"
@@ -408,7 +397,6 @@
         "raw_network_request": false,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#ff9f43"
@@ -442,7 +430,6 @@
         "http_request_recreate": false,
         "floss_extract": true,
         "crypto_solver": true,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#f1c40f"
@@ -477,7 +464,6 @@
         "raw_network_request": true,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#303952"
@@ -509,9 +495,9 @@
         "generate_exploit_script": false,
         "fuzz_harness_gen": false,
         "http_request_recreate": true,
+        "raw_network_request": true,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#e74c3c"
@@ -542,7 +528,6 @@
         "raw_network_request": true,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#3c40c6"
@@ -574,9 +559,9 @@
         "generate_exploit_script": false,
         "fuzz_harness_gen": false,
         "http_request_recreate": false,
+        "raw_network_request": true,
         "floss_extract": false,
         "crypto_solver": false,
-        "mobsf_scan": false,
         "fuzz_concolic": false
       },
       "color": "#8e44ad"

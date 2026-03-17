@@ -12,59 +12,58 @@ param(
 $ErrorActionPreference = "Stop"
 
 function Show-Banner {
-    Write-Host " ____  ________________________                     " -ForegroundColor Magenta
-    Write-Host " `u{2572}   `u{2572}`u{2571}  `u{2571}`u{2572}______   `u{2572}_   _____`u{2571}____ _______  _____  " -ForegroundColor Magenta
-    Write-Host "  `u{2572}     `u{2571}  `u{2502}     ___`u{2571}`u{2502}    __) `u{2572}__  `u{2572}`u{2572}_  __ `u{2572}`u{2571}     `u{2572} " -ForegroundColor DarkMagenta
-    Write-Host "  `u{2571}     `u{2572}  `u{2502}    `u{2502}    `u{2502}     `u{2572}   `u{2571} __ `u{2572}`u{2502}  `u{2502} `u{2572}`u{2571}  y y  `u{2572}" -ForegroundColor DarkCyan
-    Write-Host " `u{2571}___`u{2571}`u{2572}  `u{2572} `u{2502}____`u{2502}    `u{2572}___  `u{2571}  (____  `u{2571}__`u{2502}  `u{2502}__`u{2502}_`u{2502}  `u{2571}" -ForegroundColor Cyan
-    Write-Host "       `u{2572}_`u{2571}               `u{2572}`u{2571}        `u{2572}`u{2571}            `u{2572}`u{2571} " -ForegroundColor Green
-    Write-Host "                                        github.com/A3-N" -ForegroundColor Green
-    Write-Host ""
+    Write-Host "`e[38;2;139;92;246m ____  ________________________                     `e[0m"
+    Write-Host "`e[38;2;122;98;230m `u{2572}   `u{2572}`u{2571}  `u{2571}`u{2572}______   `u{2572}_   _____`u{2571}____ _______  _____  `e[0m"
+    Write-Host "`e[38;2;105;110;214m  `u{2572}     `u{2571}  `u{2502}     ___`u{2571}`u{2502}    __) `u{2572}__  `u{2572}`u{2572}_  __ `u{2572}`u{2571}     `u{2572} `e[0m"
+    Write-Host "`e[38;2;80;130;190m  `u{2571}     `u{2572}  `u{2502}    `u{2502}    `u{2502}     `u{2572}   `u{2571} __ `u{2572}`u{2502}  `u{2502} `u{2572}`u{2571}  y y  `u{2572}`e[0m"
+    Write-Host "`e[38;2;48;158;163m `u{2571}___`u{2571}`u{2572}  `u{2572} `u{2502}____`u{2502}    `u{2572}___  `u{2571}  (____  `u{2571}__`u{2502}  `u{2502}__`u{2502}_`u{2502}  `u{2571}`e[0m"
+    Write-Host "`e[38;2;16;185;129m       `u{2572}_`u{2571}               `u{2572}`u{2571}        `u{2572}`u{2571}            `u{2572}`u{2571} `e[0m"
+    Write-Host "`e[38;2;16;185;129m                                    github.com/A3-N`e[0m"
 }
 
 function Assert-Docker {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-        Write-Host "Error: Docker is not installed" -ForegroundColor Red
+        Write-Host "`e[1;31mError: Docker is not installed`e[0m"
         exit 1
     }
 }
 
-function Import-EnvFile {
-    if (Test-Path ".env") {
-        Write-Host "Loading environment variables from .env..."
-        Get-Content ".env" | ForEach-Object {
-            $line = $_.Trim()
-            if ($line -and -not $line.StartsWith("#")) {
-                $parts = $line -split "=", 2
-                if ($parts.Count -eq 2) {
-                    [Environment]::SetEnvironmentVariable($parts[0].Trim(), $parts[1].Trim(), "Process")
-                }
-            }
-        }
-    }
-}
 
 function Invoke-Build {
     Assert-Docker
     Show-Banner
-    Import-EnvFile
-    Write-Host "Building XPFarm + Overlord containers..." -ForegroundColor Yellow
+    Write-Host "`e[1mBuilding XPFarm + Overlord containers...`e[0m"
     docker compose build
     Write-Host ""
-    Write-Host "Build complete! Run .\xpfarm.ps1 up to start." -ForegroundColor Green
+    Write-Host "`e[1;32mBuild complete!`e[0m Run `e[1m.\xpfarm.ps1 up`e[0m to start."
 }
 
 function Invoke-Up {
     Assert-Docker
     Show-Banner
-    Import-EnvFile
-    Write-Host "Starting XPFarm + Overlord..." -ForegroundColor Yellow
+
+    # Ensure data directory exists
+    if (-not (Test-Path "data")) {
+        New-Item -ItemType Directory -Force -Path "data" | Out-Null
+    }
+
+    Write-Host "`e[1mStarting XPFarm + Overlord...`e[0m"
     docker compose up -d
 
+    Write-Host "`e[1mWaiting for XPFarm web UI to be ready...`e[0m"
+    while ($true) {
+        try {
+            $response = Invoke-WebRequest -Uri "http://localhost:8888" -UseBasicParsing -ErrorAction Stop
+            break
+        } catch {
+            Start-Sleep -Seconds 2
+        }
+    }
+
     Write-Host ""
-    Write-Host "Environment is running!" -ForegroundColor Green
-    Write-Host "  XPFarm:   http://localhost:8888"
-    Write-Host "  Overlord: Running (internal)"
+    Write-Host "`e[1;32mEnvironment is running and web UI is ready!`e[0m"
+    Write-Host "  XPFarm:   `e[1mhttp://localhost:8888`e[0m"
+    Write-Host "  Overlord: `e[1mRunning (internal)`e[0m"
     Write-Host ""
     docker compose ps
 }
@@ -72,12 +71,12 @@ function Invoke-Up {
 function Invoke-OnlyGo {
     param([string[]]$GoArgs = @())
     Show-Banner
-    Write-Host "Building XPFarm (Go native, no Docker)..." -ForegroundColor Yellow
-    Write-Host "Note: Overlord features require Docker." -ForegroundColor Yellow
+    Write-Host "`e[1mBuilding XPFarm (Go native, no Docker)...`e[0m"
+    Write-Host "`e[1mNote: Overlord features require Docker.`e[0m"
     Write-Host ""
 
     go build -o xpfarm.exe main.go
-    Write-Host "Build complete. Starting..." -ForegroundColor Green
+    Write-Host "`e[1;32mBuild complete. Starting...`e[0m"
     if ($GoArgs.Count -gt 0) {
         & .\xpfarm.exe @GoArgs
     } else {
@@ -87,9 +86,9 @@ function Invoke-OnlyGo {
 
 function Invoke-Down {
     Assert-Docker
-    Write-Host "Stopping all containers..." -ForegroundColor Yellow
+    Write-Host "`e[1mStopping all containers...`e[0m"
     docker compose down
-    Write-Host "Environment stopped." -ForegroundColor Green
+    Write-Host "`e[1;32mEnvironment stopped.`e[0m"
 }
 
 function Show-Help {
@@ -106,9 +105,9 @@ function Show-Help {
     Write-Host "  help" -NoNewline -ForegroundColor White; Write-Host "        Show this help message"
     Write-Host ""
     Write-Host "Examples:"
-    Write-Host "  .\xpfarm.ps1 build" -NoNewline; Write-Host "        # Build containers" -ForegroundColor Green
-    Write-Host "  .\xpfarm.ps1 up" -NoNewline; Write-Host "           # Start full stack" -ForegroundColor Green
-    Write-Host "  .\xpfarm.ps1 onlyGo" -NoNewline; Write-Host "       # Dev mode, Go only" -ForegroundColor Green
+    Write-Host "  .\xpfarm.ps1 build        # Build containers"
+    Write-Host "  .\xpfarm.ps1 up           # Start full stack"
+    Write-Host "  .\xpfarm.ps1 onlyGo       # Dev mode, Go only"
 }
 
 switch ($Command) {

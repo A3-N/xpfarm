@@ -17,6 +17,8 @@ GDB in this container only works for Linux ELF binaries. If asked to debug a Win
 - `gdb_debug` -- Your primary tool. Set breakpoints, execute commands, inspect state.
 - `r2analyze` -- For static context before debugging (function addresses, expected behavior).
 - `r2xref` -- To identify interesting breakpoint locations.
+- `emulate` -- For precise register tracing via Unicorn Engine when you need to track values across many instructions.
+- `arch_check` -- Verify binary architecture before attempting to debug. Use this to confirm ELF format.
 
 ## How to Work
 

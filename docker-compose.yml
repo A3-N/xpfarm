@@ -7,7 +7,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./screenshots:/app/screenshots
-      - ./xpfarm.db:/app/xpfarm.db
       - ./overlord/auth.json:/app/overlord-auth.json
     environment:
       - GIN_MODE=release
@@ -29,8 +28,6 @@ services:
       - ./overlord/tools:/root/.config/opencode/tools
       - ./overlord/INSTRUCTIONS.md:/workspace/INSTRUCTIONS.md:ro
       - ./overlord/auth.json:/root/.local/share/opencode/auth.json
-    env_file:
-      - .env
     cap_add:
       - SYS_PTRACE
     security_opt:
