@@ -43,7 +43,7 @@ cmd_up() {
     echo -e "\033[1mStarting XPFarm + Overlord...\033[0m"
     docker compose up -d
 
-    echo -e "\033[1mWaiting for XPFarm web UI to be ready...\033[0m"
+    echo -e "\033[1mWaiting for XPFarm web UI...\033[0m"
     while ! curl -s http://localhost:8888/ > /dev/null; do
         sleep 2
     done

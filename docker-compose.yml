@@ -7,6 +7,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./screenshots:/app/screenshots
+      - ./overlord/binaries:/app/overlord/binaries
+      - ./overlord/output:/app/overlord/output
       - ./overlord/auth.json:/app/overlord-auth.json
     environment:
       - GIN_MODE=release
