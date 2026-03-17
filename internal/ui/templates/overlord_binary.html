@@ -51,87 +51,284 @@
         color: var(--color-text);
     }
 
-    .ba-chat {
+    .ba-main {
         flex: 1;
         display: flex;
         flex-direction: column;
+        min-width: 0;
     }
 
-    .ba-chat-header {
+    .ba-header {
         padding: 15px 20px;
         border-bottom: 1px solid var(--border-color);
         display: flex;
         justify-content: space-between;
         align-items: center;
+        flex-shrink: 0;
     }
 
-    .ba-messages {
+    .ba-output-area {
         flex: 1;
-        overflow-y: auto;
-        padding: 20px;
+        overflow: hidden;
         display: flex;
         flex-direction: column;
-        gap: 16px;
+        min-height: 0;
     }
 
-    .ba-msg {
-        max-width: 85%;
-        padding: 12px 16px;
-        border-radius: 12px;
+    /* Main analysis output — rendered markdown */
+    .ba-analysis-panel {
+        flex: 7;
+        overflow-y: auto;
+        min-height: 60px;
+    }
+
+    .ba-analysis {
+        padding: 24px 28px;
         font-size: 0.9rem;
+        line-height: 1.7;
+        color: var(--color-text);
+    }
+
+    .ba-analysis:empty::before {
+        content: '';
+        display: none;
+    }
+
+    /* Markdown rendering styles */
+    .ba-analysis h1, .ba-analysis h2, .ba-analysis h3,
+    .ba-analysis h4, .ba-analysis h5, .ba-analysis h6 {
+        color: var(--color-text);
+        margin: 1.2em 0 0.5em;
+        font-weight: 600;
+    }
+    .ba-analysis h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; }
+    .ba-analysis h2 { font-size: 1.2rem; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; }
+    .ba-analysis h3 { font-size: 1.05rem; }
+    .ba-analysis h1:first-child, .ba-analysis h2:first-child { margin-top: 0; }
+
+    .ba-analysis p { margin: 0.6em 0; }
+
+    .ba-analysis ul, .ba-analysis ol {
+        margin: 0.5em 0;
+        padding-left: 1.5em;
+    }
+    .ba-analysis li { margin: 0.25em 0; }
+
+    .ba-analysis code {
+        background: rgba(139, 92, 246, 0.1);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 0.85em;
+        color: #c4b5fd;
+    }
+
+    .ba-analysis pre {
+        background: #0a0a0a;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 14px 18px;
+        overflow-x: auto;
+        margin: 0.8em 0;
+    }
+    .ba-analysis pre code {
+        background: none;
+        padding: 0;
+        color: #e2e8f0;
+        font-size: 0.82rem;
         line-height: 1.5;
-        white-space: pre-wrap;
-        word-break: break-word;
     }
 
-    .ba-msg-user {
-        align-self: flex-end;
-        background: linear-gradient(135deg, #8b5cf6, #7c3aed);
-        color: white;
-        border-bottom-right-radius: 4px;
+    .ba-analysis table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0.8em 0;
+        font-size: 0.85rem;
     }
-
-    .ba-msg-assistant {
-        align-self: flex-start;
-        background: var(--bg-card);
+    .ba-analysis th {
+        background: rgba(139, 92, 246, 0.08);
+        text-align: left;
+        padding: 8px 12px;
+        border: 1px solid var(--border-color);
+        font-weight: 600;
+        color: var(--color-text);
+    }
+    .ba-analysis td {
+        padding: 8px 12px;
         border: 1px solid var(--border-color);
         color: var(--color-text);
-        border-bottom-left-radius: 4px;
+    }
+    .ba-analysis tr:hover td {
+        background: rgba(255, 255, 255, 0.02);
     }
 
-    .ba-msg-tool {
-        align-self: flex-start;
-        background: rgba(16, 185, 129, 0.08);
-        border: 1px solid rgba(16, 185, 129, 0.2);
-        color: var(--color-text);
-        font-family: monospace;
-        font-size: 0.8rem;
-        max-width: 90%;
-    }
-
-    .ba-msg-tool summary {
-        cursor: pointer;
-        color: #10b981;
-        font-weight: 600;
-        padding: 0;
-        font-size: 0.8rem;
-    }
-
-    .ba-msg-agent {
-        align-self: center;
-        background: none;
-        border: none;
-        padding: 4px 12px;
-        font-size: 0.75rem;
+    .ba-analysis blockquote {
+        border-left: 3px solid #8b5cf6;
+        margin: 0.8em 0;
+        padding: 8px 16px;
         color: var(--color-muted);
-        font-style: italic;
+        background: rgba(139, 92, 246, 0.04);
+        border-radius: 0 6px 6px 0;
     }
 
+    .ba-analysis hr {
+        border: none;
+        border-top: 1px solid var(--border-color);
+        margin: 1.5em 0;
+    }
+
+    .ba-analysis strong { color: var(--color-text); font-weight: 600; }
+    .ba-analysis a { color: #8b5cf6; text-decoration: underline; }
+
+    /* Drag handle between panels */
+    .ba-drag-handle {
+        height: 6px;
+        background: var(--border-color);
+        cursor: row-resize;
+        flex-shrink: 0;
+        position: relative;
+        transition: background 0.15s;
+    }
+
+    .ba-drag-handle:hover,
+    .ba-drag-handle.dragging {
+        background: #8b5cf6;
+    }
+
+    .ba-drag-handle::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 40px;
+        height: 3px;
+        border-radius: 2px;
+        background: rgba(255,255,255,0.15);
+    }
+
+    .ba-drag-handle:hover::after,
+    .ba-drag-handle.dragging::after {
+        background: rgba(255,255,255,0.4);
+    }
+
+    /* Activity log section */
+    .ba-activity-panel {
+        flex: 3;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-height: 40px;
+    }
+
+    .ba-activity-header {
+        padding: 8px 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--color-muted);
+        background: rgba(0, 0, 0, 0.15);
+        user-select: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .ba-activity-count {
+        background: rgba(139, 92, 246, 0.2);
+        color: #a78bfa;
+        font-size: 0.7rem;
+        padding: 1px 7px;
+        border-radius: 10px;
+        font-weight: 500;
+    }
+
+    .ba-activity-log {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .ba-activity-item {
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-family: monospace;
+        font-size: 0.78rem;
+        color: var(--color-muted);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .ba-activity-item details summary {
+        padding: 0;
+        background: none;
+        font-size: 0.78rem;
+        color: var(--color-muted);
+        font-weight: 500;
+    }
+
+    .ba-activity-item details summary:hover {
+        color: var(--color-text);
+    }
+
+    .ba-activity-item pre {
+        margin: 6px 0 0;
+        white-space: pre-wrap;
+        font-size: 0.72rem;
+        max-height: 200px;
+        overflow-y: auto;
+        background: #0a0a0a;
+        padding: 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        color: #e2e8f0;
+    }
+
+    .ba-activity-agent {
+        font-style: italic;
+        color: #a78bfa;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.75rem;
+        padding: 4px 10px;
+    }
+
+    .ba-activity-step {
+        border-top: 1px dashed var(--border-color);
+        margin: 4px 0;
+        opacity: 0.3;
+    }
+
+    .ba-activity-cost {
+        text-align: center;
+        font-size: 0.65rem;
+        color: var(--color-muted);
+        padding: 2px 0;
+    }
+
+    /* Empty state */
+    .ba-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        color: var(--color-muted);
+        text-align: center;
+        padding: 40px;
+    }
+
+    /* Input area */
     .ba-input-area {
         padding: 15px 20px;
         border-top: 1px solid var(--border-color);
         display: flex;
         gap: 10px;
+        flex-shrink: 0;
     }
 
     .ba-input {
@@ -174,17 +371,7 @@
         transform: none;
     }
 
-    .ba-empty {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        flex: 1;
-        color: var(--color-muted);
-        text-align: center;
-        padding: 40px;
-    }
-
+    /* Upload zone */
     .ba-upload-zone {
         padding: 15px;
         border-top: 1px solid var(--border-color);
@@ -206,7 +393,24 @@
         border-color: var(--color-primary);
         color: var(--color-primary);
     }
+
+    /* Reasoning block in activity */
+    .ba-reasoning-pre {
+        margin: 6px 0 0;
+        white-space: pre-wrap;
+        font-size: 0.72rem;
+        max-height: 200px;
+        overflow-y: auto;
+        background: #0a0a0a;
+        padding: 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        color: #e2e8f0;
+    }
 </style>
+
+<!-- marked.js for markdown rendering -->
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 
 <div class="ba-container">
     <!-- File Sidebar -->
@@ -250,9 +454,9 @@
         </div>
     </div>
 
-    <!-- Chat Area -->
-    <div class="ba-chat">
-        <div class="ba-chat-header">
+    <!-- Main Content -->
+    <div class="ba-main">
+        <div class="ba-header">
             <div>
                 <span style="font-weight: 600;">Binary & Archive</span>
                 <span id="session-indicator"
@@ -281,11 +485,28 @@
             </div>
         </div>
 
-        <div class="ba-messages" id="messages">
+        <div class="ba-output-area" id="output-area">
             <div class="ba-empty" id="empty-state">
                 <div style="font-size: 2.5rem; margin-bottom: 15px; opacity: 0.3;">🔬</div>
                 <p style="font-size: 1rem; margin-bottom: 5px;">Ready to analyze</p>
                 <p style="font-size: 0.85rem;">Upload a binary and describe what you want to investigate.</p>
+            </div>
+
+            <!-- Analysis output (markdown rendered) -->
+            <div class="ba-analysis-panel" id="analysis-panel" style="display: none;">
+                <div class="ba-analysis" id="analysis-output"></div>
+            </div>
+
+            <!-- Drag handle -->
+            <div class="ba-drag-handle" id="drag-handle" style="display: none;"></div>
+
+            <!-- Activity log (tools, reasoning, agents) -->
+            <div class="ba-activity-panel" id="activity-section" style="display: none;">
+                <div class="ba-activity-header">
+                    ⚙ Activity
+                    <span class="ba-activity-count" id="activity-count">0</span>
+                </div>
+                <div class="ba-activity-log" id="activity-log"></div>
             </div>
         </div>
 
@@ -304,6 +525,23 @@
     let isStreaming = false;
     let eventSource = null;
     const STORAGE_KEY = 'overlord_last_session';
+    let activityCounter = 0;
+
+    // Configure marked for safe rendering
+    if (typeof marked !== 'undefined') {
+        marked.setOptions({
+            breaks: true,
+            gfm: true
+        });
+    }
+
+    function renderMarkdown(text) {
+        if (typeof marked !== 'undefined' && text) {
+            try { return marked.parse(text); }
+            catch (e) { return escapeHtml(text); }
+        }
+        return escapeHtml(text);
+    }
 
     function insertBinaryPath(name) {
         const input = document.getElementById('chat-input');
@@ -320,7 +558,7 @@
             const data = await resp.json();
             if (data.status === 'uploaded') location.reload();
         } catch (e) {
-            addMessage('system', 'Upload failed: ' + e.message);
+            showAnalysis('<p style="color:#ef4444;">Upload failed: ' + escapeHtml(e.message) + '</p>');
         }
         input.value = '';
     }
@@ -329,9 +567,19 @@
         if (eventSource) { eventSource.close(); eventSource = null; }
         currentSession = null;
         localStorage.removeItem(STORAGE_KEY);
-        document.getElementById('messages').innerHTML =
-            '<div class="ba-empty" id="empty-state"><div style="font-size:2.5rem;margin-bottom:15px;opacity:0.3;">🔬</div><p style="font-size:1rem;margin-bottom:5px;">Ready to analyze</p><p style="font-size:0.85rem;">Upload a binary and describe what you want to investigate.</p></div>';
+        resetUI();
+    }
+
+    function resetUI() {
+        document.getElementById('analysis-output').innerHTML = '';
+        document.getElementById('analysis-panel').style.display = 'none';
+        document.getElementById('drag-handle').style.display = 'none';
+        document.getElementById('activity-log').innerHTML = '';
+        document.getElementById('activity-section').style.display = 'none';
+        document.getElementById('empty-state').style.display = '';
         document.getElementById('session-indicator').textContent = '';
+        activityCounter = 0;
+        updateActivityCount();
         setStreamingUI(false);
     }
 
@@ -341,28 +589,49 @@
         document.getElementById('stop-btn').style.display = streaming ? '' : 'none';
     }
 
-    function addMessage(role, content) {
-        const empty = document.getElementById('empty-state');
-        if (empty) empty.remove();
-        const msgs = document.getElementById('messages');
-        const div = document.createElement('div');
+    function showAnalysis(html) {
+        document.getElementById('empty-state').style.display = 'none';
+        document.getElementById('analysis-panel').style.display = '';
+        const out = document.getElementById('analysis-output');
+        out.innerHTML = html;
+        scrollOutput();
+    }
 
-        if (role === 'user') {
-            div.className = 'ba-msg ba-msg-user';
-            div.textContent = content;
-        } else if (role === 'tool') {
-            div.className = 'ba-msg ba-msg-tool';
-            div.innerHTML = '<details><summary>🔧 ' + escapeHtml(content.name || 'Tool Call') + '</summary><pre style="margin:8px 0 0;white-space:pre-wrap;font-size:0.75rem;">' + escapeHtml(content.detail || JSON.stringify(content, null, 2)) + '</pre></details>';
-        } else if (role === 'agent') {
-            div.className = 'ba-msg ba-msg-agent';
-            div.textContent = '↪ Agent: ' + content;
-        } else {
-            div.className = 'ba-msg ba-msg-assistant';
-            div.textContent = content;
-        }
-        msgs.appendChild(div);
-        msgs.scrollTop = msgs.scrollHeight;
-        return div;
+    function appendAnalysis(html) {
+        document.getElementById('empty-state').style.display = 'none';
+        document.getElementById('analysis-panel').style.display = '';
+        const out = document.getElementById('analysis-output');
+        out.innerHTML = html;
+        scrollOutput();
+    }
+
+    function addActivity(html) {
+        document.getElementById('empty-state').style.display = 'none';
+        const section = document.getElementById('activity-section');
+        section.style.display = '';
+        document.getElementById('drag-handle').style.display = '';
+        const log = document.getElementById('activity-log');
+        const div = document.createElement('div');
+        div.innerHTML = html;
+        log.appendChild(div.firstElementChild || div);
+        activityCounter++;
+        updateActivityCount();
+        scrollActivity();
+        return log.lastElementChild;
+    }
+
+    function updateActivityCount() {
+        document.getElementById('activity-count').textContent = activityCounter;
+    }
+
+    function scrollOutput() {
+        const panel = document.getElementById('analysis-panel');
+        panel.scrollTop = panel.scrollHeight;
+    }
+
+    function scrollActivity() {
+        const log = document.getElementById('activity-log');
+        log.scrollTop = log.scrollHeight;
     }
 
     function escapeHtml(str) {
@@ -405,7 +674,7 @@
             list.innerHTML = sessions.map(s => {
                 const isActive = currentSession === s.id;
                 const date = s.time?.updated ? new Date(s.time.updated * 1000).toLocaleString() : '';
-                return `<div onclick="loadSession('${s.id}')" style="padding: 8px 10px; border-radius: 6px; cursor: pointer; margin-bottom: 2px; font-size: 0.8rem; ${isActive ? 'background: rgba(139,92,246,0.15); border-left: 2px solid #8b5cf6;' : ''} transition: background 0.15s;" onmouseenter="this.style.background=this.style.background||'var(--bg-hover)'" onmouseleave="this.style.background='${isActive ? 'rgba(139,92,246,0.15)' : ''}'">`
+                return `<div onclick="loadSession('${s.id}')" style="padding: 8px 10px; border-radius: 6px; cursor: pointer; margin-bottom: 2px; font-size: 0.8rem; ${isActive ? 'background: rgba(139,92,246,0.15); border-left: 2px solid #8b5cf6;' : ''} transition: background 0.15s;" onmouseenter="this.style.background=this.style.background||'var(--bg-hover)'" onmouseleave="this.style.background='${isActive ? 'rgba(139,92,246,0.15)' : ''}'">` 
                     + `<div style="font-weight: 500; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(s.title || 'Untitled')}</div>`
                     + `<div style="font-size: 0.7rem; color: var(--color-muted); margin-top: 2px;">${s.id.slice(0, 8)} • ${date}</div>`
                     + `</div>`;
@@ -423,43 +692,65 @@
         sessionsPanelOpen = false;
         document.getElementById('sessions-panel').style.display = 'none';
 
-        const msgs = document.getElementById('messages');
-        msgs.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--color-muted);">Loading messages...</div>';
+        // Reset UI
+        document.getElementById('empty-state').style.display = 'none';
+        document.getElementById('analysis-panel').style.display = '';
+        const analysisOut = document.getElementById('analysis-output');
+        analysisOut.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--color-muted);">Loading messages...</div>';
+        document.getElementById('activity-log').innerHTML = '';
+        document.getElementById('drag-handle').style.display = 'none';
+        document.getElementById('activity-section').style.display = 'none';
+        activityCounter = 0;
+        updateActivityCount();
 
         try {
             const resp = await fetch('/api/overlord/sessions/' + sessionID + '/messages');
             const messages = await resp.json();
-            msgs.innerHTML = '';
+
+            let combinedText = '';
+            const activityItems = [];
 
             if (!messages || messages.length === 0) {
-                msgs.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--color-muted); font-size: 0.85rem;">No messages in this session yet.</div>';
+                analysisOut.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--color-muted); font-size: 0.85rem;">No messages in this session yet.</div>';
             } else {
                 messages.forEach(msg => {
                     const info = msg.info;
                     const parts = msg.parts || [];
-                    if (info?.role === 'user') {
-                        const textParts = parts.filter(p => p.type === 'text');
-                        const text = textParts.map(p => p.text || '').join('\n') || '(user message)';
-                        addMessage('user', text);
-                    } else if (info?.role === 'assistant') {
+                    if (info?.role === 'assistant') {
                         const textParts = parts.filter(p => p.type === 'text');
                         const toolParts = parts.filter(p => p.type === 'tool');
                         if (textParts.length > 0) {
-                            addMessage('assistant', textParts.map(p => p.text || '').join('\n'));
+                            combinedText += textParts.map(p => p.text || '').join('\n');
                         }
                         toolParts.forEach(p => {
                             const state = p.state || {};
-                            addMessage('tool', {
-                                name: p.tool + ' (' + (state.status || 'unknown') + ')',
-                                detail: state.output || state.error || JSON.stringify(state.input, null, 2)
-                            });
+                            const statusIcon = state.status === 'completed' ? '✅' : state.status === 'error' ? '❌' : '⏳';
+                            const title = state.title || p.tool || 'tool';
+                            const output = state.output ? state.output.substring(0, 500) : state.error || JSON.stringify(state.input, null, 2);
+                            activityItems.push(`<div class="ba-activity-item"><details><summary>${statusIcon} ${escapeHtml(title)}</summary><pre>${escapeHtml(output)}</pre></details></div>`);
                         });
                     }
+                    // Skip user messages — no echo
                 });
+
+                if (combinedText) {
+                    analysisOut.innerHTML = renderMarkdown(combinedText);
+                } else {
+                    analysisOut.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--color-muted); font-size: 0.85rem;">No analysis output yet.</div>';
+                }
+
+                if (activityItems.length > 0) {
+                    const section = document.getElementById('activity-section');
+                    section.style.display = '';
+                    document.getElementById('drag-handle').style.display = '';
+                    document.getElementById('activity-log').innerHTML = activityItems.join('');
+                    activityCounter = activityItems.length;
+                    updateActivityCount();
+                }
             }
             connectSSE();
         } catch (e) {
-            msgs.innerHTML = '<div style="padding: 20px; text-align: center; color: #ef4444;">Failed to load session: ' + e.message + '</div>';
+            analysisOut.innerHTML = '<div style="padding: 20px; text-align: center; color: #ef4444;">Failed to load session: ' + escapeHtml(e.message) + '</div>';
         }
     }
 
@@ -467,12 +758,11 @@
     const toolDivs = {};
     let reasoningDiv = null;
     let reasoningText = '';
+    let fullText = '';
 
     function connectSSE() {
         if (eventSource) eventSource.close();
         eventSource = new EventSource('/api/overlord/events');
-        let assistantDiv = null;
-        let fullText = '';
         reasoningDiv = null;
         reasoningText = '';
 
@@ -486,18 +776,17 @@
                     if (!part || part.sessionID !== currentSession) return;
 
                     if (part.type === 'text') {
-                        reasoningDiv = null; reasoningText = '';
-                        if (!assistantDiv) {
-                            assistantDiv = addMessage('assistant', '');
-                            fullText = '';
-                        }
+                        document.getElementById('empty-state').style.display = 'none';
+                        document.getElementById('analysis-panel').style.display = '';
+                        const out = document.getElementById('analysis-output');
+
                         if (data.properties.delta) {
                             fullText += data.properties.delta;
                         } else {
                             fullText = part.text || fullText;
                         }
-                        assistantDiv.textContent = fullText;
-                        document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+                        out.innerHTML = renderMarkdown(fullText);
+                        scrollOutput();
 
                     } else if (part.type === 'tool') {
                         const state = part.state || {};
@@ -506,10 +795,14 @@
 
                         if (!toolDivs[callID]) {
                             const div = document.createElement('div');
-                            div.className = 'ba-msg ba-msg-tool';
-                            div.style.maxWidth = '95%';
+                            div.className = 'ba-activity-item';
                             toolDivs[callID] = div;
-                            document.getElementById('messages').appendChild(div);
+                            document.getElementById('empty-state').style.display = 'none';
+                            const section = document.getElementById('activity-section');
+                            section.style.display = '';
+                            document.getElementById('activity-log').appendChild(div);
+                            activityCounter++;
+                            updateActivityCount();
                         }
 
                         const div = toolDivs[callID];
@@ -517,53 +810,65 @@
                         const title = state.title || toolName;
 
                         if (state.status === 'pending' || state.status === 'running') {
-                            div.innerHTML = '<div style="display:flex;align-items:center;gap:6px;font-size:0.8rem;">' + statusIcon + ' <strong>' + escapeHtml(title) + '</strong> <span style="color:var(--color-muted);font-size:0.7rem;">running...</span></div>';
+                            div.innerHTML = '<div style="display:flex;align-items:center;gap:6px;">' + statusIcon + ' <strong>' + escapeHtml(title) + '</strong> <span style="color:var(--color-muted);font-size:0.7rem;">running...</span></div>';
                         } else if (state.status === 'completed') {
                             const output = state.output ? state.output.substring(0, 500) : '';
-                            div.innerHTML = '<details><summary style="font-size:0.8rem;">' + statusIcon + ' ' + escapeHtml(title) + '</summary>'
-                                + '<pre style="margin:6px 0 0;white-space:pre-wrap;font-size:0.72rem;max-height:200px;overflow-y:auto;">' + escapeHtml(output) + '</pre></details>';
+                            div.innerHTML = '<details><summary>' + statusIcon + ' ' + escapeHtml(title) + '</summary><pre>' + escapeHtml(output) + '</pre></details>';
                         } else if (state.status === 'error') {
-                            div.innerHTML = '<details open><summary style="font-size:0.8rem;color:#ef4444;">' + statusIcon + ' ' + escapeHtml(title) + ' — error</summary>'
-                                + '<pre style="margin:6px 0 0;white-space:pre-wrap;font-size:0.72rem;color:#ef4444;">' + escapeHtml(state.error || '') + '</pre></details>';
+                            div.innerHTML = '<details open><summary style="color:#ef4444;">' + statusIcon + ' ' + escapeHtml(title) + ' — error</summary><pre style="color:#ef4444;">' + escapeHtml(state.error || '') + '</pre></details>';
                         }
-                        document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+                        scrollActivity();
 
                     } else if (part.type === 'reasoning') {
                         if (!reasoningDiv) {
                             reasoningDiv = document.createElement('div');
-                            reasoningDiv.className = 'ba-msg ba-msg-tool';
-                            reasoningDiv.style.maxWidth = '95%';
-                            reasoningDiv.innerHTML = '<details open><summary style="font-size:0.8rem;">💭 Thinking...</summary><pre class="reasoning-pre" style="margin:6px 0 0;white-space:pre-wrap;font-size:0.72rem;max-height:200px;overflow-y:auto;"></pre></details>';
-                            document.getElementById('messages').appendChild(reasoningDiv);
+                            reasoningDiv.className = 'ba-activity-item';
+                            reasoningDiv.innerHTML = '<details open><summary>💭 Thinking...</summary><pre class="ba-reasoning-pre"></pre></details>';
+                            document.getElementById('empty-state').style.display = 'none';
+                            const section = document.getElementById('activity-section');
+                            section.style.display = '';
+                            document.getElementById('drag-handle').style.display = '';
+                            document.getElementById('activity-log').appendChild(reasoningDiv);
                             reasoningText = '';
+                            activityCounter++;
+                            updateActivityCount();
                         }
                         const delta = data.properties.delta || part.text || '';
                         reasoningText += delta;
-                        reasoningDiv.querySelector('.reasoning-pre').textContent = reasoningText;
-                        document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+                        reasoningDiv.querySelector('.ba-reasoning-pre').textContent = reasoningText;
+                        scrollActivity();
 
                     } else if (part.type === 'agent') {
-                        addMessage('agent', part.name || 'subagent');
+                        const div = document.createElement('div');
+                        div.className = 'ba-activity-agent';
+                        div.textContent = '↪ Agent: ' + (part.name || 'subagent');
+                        document.getElementById('empty-state').style.display = 'none';
+                        const section = document.getElementById('activity-section');
+                        section.style.display = '';
+                        document.getElementById('drag-handle').style.display = '';
+                        document.getElementById('activity-log').appendChild(div);
+                        activityCounter++;
+                        updateActivityCount();
+                        scrollActivity();
 
                     } else if (part.type === 'step-start') {
                         const div = document.createElement('div');
-                        div.style.cssText = 'border-top:1px dashed var(--border-color);margin:8px 0;opacity:0.3;';
-                        document.getElementById('messages').appendChild(div);
+                        div.className = 'ba-activity-step';
+                        document.getElementById('activity-log').appendChild(div);
 
                     } else if (part.type === 'step-finish') {
                         const cost = part.cost ? ' • $' + part.cost.toFixed(4) : '';
                         const tokens = part.tokens ? ' • ' + part.tokens.input + ' in / ' + part.tokens.output + ' out' : '';
                         if (cost || tokens) {
                             const div = document.createElement('div');
-                            div.style.cssText = 'text-align:center;font-size:0.65rem;color:var(--color-muted);padding:2px 0;';
+                            div.className = 'ba-activity-cost';
                             div.textContent = 'Step complete' + cost + tokens;
-                            document.getElementById('messages').appendChild(div);
+                            document.getElementById('activity-log').appendChild(div);
                         }
                     }
 
                 } else if (data.type === 'session.idle') {
                     if (data.properties?.sessionID === currentSession) {
-                        assistantDiv = null;
                         fullText = '';
                         reasoningDiv = null;
                         reasoningText = '';
@@ -614,8 +919,10 @@
         if (!message || isStreaming) return;
 
         input.value = '';
-        addMessage('user', message);
         setStreamingUI(true);
+
+        // Reset output for new analysis
+        fullText = '';
 
         try {
             // Create session if needed
@@ -630,13 +937,12 @@
                     currentSession = session.id;
                     localStorage.setItem(STORAGE_KEY, session.id);
                     document.getElementById('session-indicator').textContent = 'Session: ' + session.id.slice(0, 8);
-                    // Connect SSE FIRST, then send prompt so we catch all events
                     connectSSE();
                     // Small delay to ensure SSE is connected before prompt fires
                     await new Promise(r => setTimeout(r, 300));
                 } else {
                     const errMsg = (session && session.error) ? session.error : 'Failed to create session. Is the Overlord container running?';
-                    addMessage('assistant', errMsg);
+                    showAnalysis('<p style="color:#ef4444;">' + escapeHtml(errMsg) + '</p>');
                     setStreamingUI(false);
                     return;
                 }
@@ -650,22 +956,75 @@
             });
             const result = await promptResp.json();
             if (result && result.error) {
-                addMessage('assistant', 'Error: ' + result.error);
+                showAnalysis('<p style="color:#ef4444;">Error: ' + escapeHtml(result.error) + '</p>');
                 setStreamingUI(false);
             }
             // All content arrives via SSE — session.idle re-enables send
         } catch (e) {
-            addMessage('assistant', 'Failed to connect to Overlord: ' + e.message);
+            showAnalysis('<p style="color:#ef4444;">Failed to connect to Overlord: ' + escapeHtml(e.message) + '</p>');
             setStreamingUI(false);
         }
     }
 
-    // --- Auto-restore last session on page load ---
-    (function() {
+    // --- Auto-restore last session on page load (with validation) ---
+    (async function() {
         const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-            loadSession(saved);
+        if (!saved) return;
+
+        // Validate session still exists before loading
+        try {
+            const resp = await fetch('/api/overlord/sessions');
+            if (!resp.ok) {
+                localStorage.removeItem(STORAGE_KEY);
+                return;
+            }
+            const sessions = await resp.json();
+            if (Array.isArray(sessions) && sessions.some(s => s.id === saved)) {
+                loadSession(saved);
+            } else {
+                // Stale session — clear it
+                localStorage.removeItem(STORAGE_KEY);
+            }
+        } catch (e) {
+            // Can't reach server — clear stale reference
+            localStorage.removeItem(STORAGE_KEY);
         }
+    })();
+
+    // --- Drag Handle Resize Logic ---
+    (function() {
+        const handle = document.getElementById('drag-handle');
+        const analysisPanel = document.getElementById('analysis-panel');
+        const activityPanel = document.getElementById('activity-section');
+        const outputArea = document.getElementById('output-area');
+        let isDragging = false;
+
+        handle.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            handle.classList.add('dragging');
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const rect = outputArea.getBoundingClientRect();
+            const totalHeight = rect.height - handle.offsetHeight;
+            const offset = e.clientY - rect.top;
+            const topRatio = Math.max(0.1, Math.min(0.9, offset / rect.height));
+            const bottomRatio = 1 - topRatio;
+            analysisPanel.style.flex = topRatio;
+            activityPanel.style.flex = bottomRatio;
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!isDragging) return;
+            isDragging = false;
+            handle.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        });
     })();
 </script>
 {{end}}

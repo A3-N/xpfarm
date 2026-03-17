@@ -50,7 +50,7 @@ function Invoke-Up {
     Write-Host "`e[1mStarting XPFarm + Overlord...`e[0m"
     docker compose up -d
 
-    Write-Host "`e[1mWaiting for XPFarm web UI to be ready...`e[0m"
+    Write-Host "`e[1mWaiting for XPFarm web UI...`e[0m"
     while ($true) {
         try {
             $response = Invoke-WebRequest -Uri "http://localhost:8888" -UseBasicParsing -ErrorAction Stop
