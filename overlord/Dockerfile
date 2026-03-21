@@ -80,6 +80,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     npm install -g opencode-ai && \
     cd /usr/lib/node_modules/opencode-ai && npm install opencode-linux-x64
 
+# Install Bun (TypeScript tool runner)
+RUN curl -fsSL https://bun.sh/install | bash && \
+    ln -s /root/.bun/bin/bun /usr/local/bin/bun
+
 # Upgrade pip and setuptools first
 RUN pip3 install --upgrade pip setuptools wheel
 
