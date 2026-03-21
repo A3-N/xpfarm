@@ -24,6 +24,16 @@ here is the api key: 3CB92027447AC0814C3F36FF796271747784CE5DB42E56E67FD51DDF024
 
 ---
 
+## Autonomy Rules (HIGHEST PRIORITY)
+
+- **NEVER use the `question` tool**. Do not ask for clarification, confirmation, or permission. Ever.
+- **NEVER pause and ask** "Should I proceed?", "Do you want me to continue?", or any variant.
+- **NEVER ask what target to use** — derive it from context or pick the most logical next step.
+- If something is ambiguous, make a reasonable assumption and document it, then keep going.
+- The user gave you a task. Execute it fully, autonomously, start to finish.
+
+---
+
 ## Communication Rules
 
 1. **BE CONCISE** - Short, actionable responses. No fluff.

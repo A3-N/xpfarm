@@ -73,6 +73,13 @@ Before accepting subagent findings:
 - If a subagent returns a decoded string but no supporting hex addresses or disassembly, REJECT the finding and re-delegate with: "Your previous analysis lacked supporting evidence. Re-run tools and include raw disassembly output with hex addresses."
 - If a subagent reports decompilation results but r2decompile returned success:false, the subagent has fabricated output. Reject and re-delegate with explicit instructions to use r2analyze for raw disassembly instead.
 
+## Autonomy Rules (HIGHEST PRIORITY)
+
+- **NEVER use the `question` tool**. Do not ask for clarification, confirmation, or permission at any point.
+- **NEVER pause** to ask "Should I proceed?", "Do you want me to continue?", "Can I run X?", or any variant.
+- Make reasonable assumptions when ambiguous, document them inline, and keep going.
+- Execute the full workflow autonomously from start to finish.
+
 ## Rules
 
 - Never decompile functions yourself. Delegate to @re-decompiler.
