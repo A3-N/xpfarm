@@ -1,9 +1,11 @@
 # XPFarm
 
-An open-source vulnerability scanner that wraps well-known open-source security tools behind a single web UI.
+An open-source AI-augmented offensive security platform that wraps well-known open-source security tools behind a unified web UI, with a community Plugin SDK and a Finding Normalization Engine.
+
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/canuk40)
-if you love this project, check out my other project ObsidianBox Modern or download it from google play: 
+if you love this project, check out my other project ObsidianBox Modern or download it from google play:
 https://play.google.com/store/apps/details?id=com.busyboxmodern.app&hl=en_CA
+
 ---
 
 ### Index
@@ -14,8 +16,10 @@ https://play.google.com/store/apps/details?id=com.busyboxmodern.app&hl=en_CA
 | [Wrapped Tools](#wrapped-tools) | The 10 open-source tools orchestrated by XPFarm |
 | [Architecture Map](#architecture-map) | Full system architecture, scan pipeline, data flow, and AI subsystem |
 | [Overlord - AI Binary Analysis](#overlord---ai-binary-analysis) | Built-in AI agent for binary/malware analysis |
-| [What's New](#whats-new) | Recent security, reliability, and UX improvements |
-| [Random Screenshots](#random-screenshots) | UI screenshots of scans and logs |
+| [Plugin SDK](#plugin-sdk) | Community-extensible Tool, Agent, and Pipeline system |
+| [Finding Normalization Engine](#finding-normalization-engine) | Unified, enriched, deduplicated security findings |
+| [What's New](#whats-new) | Security, reliability, and UX improvements |
+| [Setup](#setup) | Build and deployment instructions |
 | [TODO](#todo) | Planned features and roadmap |
 
 ---
@@ -28,10 +32,10 @@ https://play.google.com/store/apps/details?id=com.busyboxmodern.app&hl=en_CA
 flowchart TB
     subgraph ENTRY["Entrypoint - main.go"]
         M1["Parse Flags<br/>-debug mode"]
-        M2["InitDB<br/>SQLite + WAL + GORM"]
+        M2["InitDB<br/>SQLite + WAL + GORM<br/>FindingRecord + GroupRecord tables"]
         M3["InitModules<br/>Register 10 tool wrappers"]
-        M4["Health Check<br/>Auto-install missing tools"]
-        M5["RunUpdates<br/>-up flag on all PD tools"]
+        M4["Load Plugins<br/>normalization/all + plugins/all<br/>via init() blank imports"]
+        M5["Health Check<br/>Auto-install missing tools"]
         M6["CheckAndIndexTemplates<br/>Nuclei template versioning"]
         M7["StartServer<br/>Gin on :8888"]
         M1 --> M2 --> M3 --> M4 --> M5 --> M6 --> M7
@@ -39,18 +43,18 @@ flowchart TB
 
     subgraph UI_LAYER["Web UI - internal/ui/server.go"]
         direction TB
-        GIN["Gin HTTP Server<br/>Embedded templates + static"]
+        GIN["Gin HTTP Server<br/>Embedded templates + static<br/>CSRF origin-check middleware"]
 
         subgraph Pages["HTML Pages"]
-            P1["Dashboard"]
+            P1["Dashboard<br/>SSE live stage progress"]
             P2["Assets"]
             P3["Asset Details"]
             P4["Target Details"]
             P5["Modules"]
-            P6["Settings"]
+            P6["Settings<br/>AES-256-GCM encrypted"]
             P7["Overlord Chat"]
-            P8["Overlord Binary"]
-            P9["Search"]
+            P8["Overlord Binary<br/>500MB cap + MIME check"]
+            P9["Search<br/>Paginated + truncation banner"]
             P10["Advanced Scan"]
             P11["Scan Settings"]
         end
@@ -62,9 +66,14 @@ flowchart TB
             A3["GET/POST /api/overlord/*"]
             A4["POST /assets/create|delete"]
             A5["POST /settings/*"]
-            A6["GET /api/active-scans"]
+            A6["GET /api/scan/events<br/>SSE stage progress"]
             A7["POST /api/search/save|delete"]
             A8["GET /api/overlord/events<br/>SSE Proxy"]
+            A9["GET /api/plugins"]
+            A10["POST /api/normalize"]
+            A11["GET /api/findings"]
+            A12["GET /api/findings/:id"]
+            A13["GET /api/groups"]
         end
 
         GIN --> Pages
@@ -73,7 +82,7 @@ flowchart TB
 
     subgraph SCAN_ENGINE["Scan Engine - internal/core/"]
         direction TB
-        SM["ScanManager<br/>Singleton, mutex-guarded<br/>Active scan tracking"]
+        SM["ScanManager<br/>Singleton, mutex-guarded<br/>Panic recovery + SSE broadcast"]
 
         subgraph PIPELINE["8-Stage Scanning Pipeline - manager.go"]
             direction TB
@@ -95,90 +104,83 @@ flowchart TB
             GW["Gowitness<br/>Screenshots"]
             KAT["Katana<br/>JS Crawling, depth=5"]
             UF["URLFinder<br/>URL Discovery"]
-            WAP["Wappalyzer<br/>Tech Detection<br/>Header + Body analysis"]
-        end
-
-        subgraph NUCLEI_PLAN["Stage 8 - Nuclei Scan Plan"]
-            direction TB
-            NP1["BuildNucleiPlan<br/>serviceTagMap lookup"]
-            NP2["Network Scans<br/>Per-port, service tags"]
-            NP3["Web Auto Scan<br/>-as wappalyzer mode"]
-            NP4["Fallback Scan<br/>Unmapped services"]
-            NP5["Enabled Mode<br/>Custom template workflow"]
-            NP1 --> NP2
-            NP1 --> NP3
-            NP1 --> NP4
-            NP1 --> NP5
-        end
-
-        subgraph RESOLVE["Target Resolution - target.go"]
-            direction LR
-            R1["ParseTarget<br/>IP / CIDR / Domain / URL"]
-            R2["ResolveAndCheck<br/>DNS + Cloudflare + Localhost"]
-            R3["DNS Cache<br/>sync.Map, 5min TTL"]
-            R1 --> R2 --> R3
-        end
-
-        subgraph SEARCH["Search Engine - search.go"]
-            SRCH["GlobalSearch<br/>Regex filter engine<br/>SQL joins across 5 tables<br/>AND/OR/Negate chaining"]
-        end
-
-        subgraph TEMPLATE_IDX["Template Indexer - template_indexer.go"]
-            TI["IndexNucleiTemplates<br/>Walk filesystem, batch upsert<br/>Version-tracked re-index"]
+            WAP["Wappalyzer<br/>Tech Detection"]
         end
 
         SM --> PIPELINE
         S6 --> STAGE6_DETAIL
-        S8 --> NUCLEI_PLAN
     end
 
-    subgraph MODULES["Module System - internal/modules/"]
+    subgraph PLUGIN_SDK["Plugin SDK - internal/plugin/ + plugins/"]
         direction TB
-        IFACE["Module Interface<br/>Name / Description<br/>CheckInstalled / Install / Run"]
+        PI["Tool / Agent / Pipeline interfaces"]
+        PR["Global registry<br/>RegisterTool / RegisterAgent / RegisterPipeline"]
+        PL["plugins/all/all.go<br/>blank-import bootstrap"]
 
-        subgraph REGISTRY["Registry - 10 Registered Modules"]
+        subgraph EXAMPLES["Bundled Example Plugins"]
             direction LR
-            T1["Subfinder<br/>Subdomain enum"]
-            T2["Naabu<br/>Port scan"]
-            T3["Nmap<br/>Service detection"]
-            T4["Httpx<br/>HTTP probe"]
-            T5["Gowitness<br/>Screenshots"]
-            T6["Katana<br/>Web crawling"]
-            T7["URLFinder<br/>URL discovery"]
-            T8["Wappalyzer<br/>Tech fingerprint"]
-            T9["Nuclei<br/>Vuln scanning"]
-            T10["CVEMap<br/>CVE lookup"]
+            EP1["example-echo<br/>EchoTool + EchoAgent"]
+            EP2["example-repo-scanner<br/>RepoScannerTool + RepoScannerAgent"]
         end
 
-        IFACE --> REGISTRY
+        PI --> PR
+        PL --> PR
+        EXAMPLES --> PR
+    end
+
+    subgraph NORM["Finding Normalization Engine - internal/normalization/"]
+        direction TB
+
+        subgraph ADAPTERS["Adapters"]
+            direction LR
+            NA1["nuclei<br/>JSONL → Finding<br/>CVE/CWE/CVSS extraction"]
+            NA2["nmap<br/>host+ports → Finding<br/>NSE script CVE regex"]
+            NA3["semgrep<br/>--json → Finding<br/>CWE from metadata"]
+            NA4["gitleaks<br/>leak report → Finding<br/>35-rule CWE map"]
+        end
+
+        subgraph ENRICHERS["Enrichers (applied in order)"]
+            direction LR
+            E1["cwe<br/>40 keyword rules<br/>35 tag mappings"]
+            E2["cvss<br/>NVD API v2<br/>cached per CVE"]
+            E3["epss<br/>FIRST.org API<br/>cached per CVE"]
+            E4["kev<br/>CISA KEV catalog<br/>sync.Once download"]
+        end
+
+        NP["Pipeline<br/>adapt → enrich → fingerprint → dedup → group"]
+        DD["dedupe<br/>SHA-256 fingerprint"]
+        GR["grouping<br/>by CWE/CVE/Severity/Target"]
+
+        ADAPTERS --> NP
+        ENRICHERS --> NP
+        NP --> DD --> GR
+    end
+
+    subgraph STORAGE["Storage - internal/storage/findings/"]
+        direction LR
+        FR["FindingRecord<br/>SQLite/GORM<br/>upsert by fingerprint"]
+        GRP["GroupRecord<br/>SQLite/GORM<br/>member IDs JSON array"]
     end
 
     subgraph DATABASE["Database - internal/database/"]
         direction TB
-        DB["SQLite + WAL Mode<br/>GORM ORM<br/>Single writer connection<br/>30s busy timeout"]
+        DB["SQLite + WAL Mode<br/>GORM ORM<br/>10 open / 5 idle conns<br/>64MB WAL cap"]
 
-        subgraph MODELS["Data Models"]
+        subgraph MODELS["Core Data Models"]
             direction LR
-            DM1["Asset<br/>name, advanced_mode"]
-            DM2["Target<br/>value, type, is_alive<br/>is_cloudflare, is_localhost"]
-            DM3["Port<br/>port, protocol<br/>service, product, version"]
-            DM4["WebAsset<br/>url, title, tech_stack<br/>screenshot, paths"]
-            DM5["Vulnerability<br/>name, severity<br/>template_id, matcher"]
-            DM6["CVE<br/>cve_id, severity<br/>cvss, epss, is_kev"]
-            DM7["ScanResult<br/>tool_name, output"]
-            DM8["ScanProfile<br/>Feature toggles<br/>Port/Web/Vuln scope"]
-            DM9["NucleiTemplate<br/>template_id, file_path"]
-            DM10["SavedSearch<br/>name, query_data"]
-            DM11["Setting<br/>key-value config"]
+            DM1["Asset"]
+            DM2["Target"]
+            DM3["Port"]
+            DM4["WebAsset"]
+            DM5["Vulnerability"]
+            DM6["CVE"]
+            DM7["ScanResult"]
+            DM8["ScanProfile"]
+            DM9["NucleiTemplate"]
+            DM10["SavedSearch"]
+            DM11["Setting<br/>AES-256-GCM encrypted"]
         end
 
-        DM1 -->|has many| DM2
-        DM2 -->|has many| DM3
-        DM2 -->|has many| DM4
-        DM2 -->|has many| DM5
-        DM2 -->|has many| DM6
-        DM2 -->|has many| DM7
-        DM1 -->|has one| DM8
         DB --> MODELS
     end
 
@@ -186,39 +188,35 @@ flowchart TB
         direction TB
         OV_PROXY["Overlord Proxy<br/>internal/overlord/overlord.go"]
 
-        subgraph OV_API["OpenCode Serve API"]
+        subgraph OV_AGENTS["19 Specialized Agents"]
             direction LR
-            OA1["GET /session<br/>List sessions"]
-            OA2["POST /session<br/>Create session"]
-            OA3["POST /session/:id/prompt_async<br/>Send message"]
-            OA4["POST /session/:id/abort<br/>Stop analysis"]
-            OA5["GET /event<br/>SSE stream"]
+            OA1["Binary RE agents<br/>re-explorer, re-debugger<br/>re-decompiler, re-scanner"]
+            OA2["APK agents<br/>apk-recon, apk-dynamic<br/>apk-decompiler"]
+            OA3["Web + Exploit agents<br/>web-tester, re-exploiter<br/>secrets-hunter, recon"]
         end
 
-        subgraph OV_FILES["File Management"]
-            direction LR
-            OF1["Binary Upload<br/>overlord/binaries/"]
-            OF2["Analysis Output<br/>overlord/output/"]
-            OF3["Auth JSON<br/>API key storage"]
+        subgraph OV_TOOLS["75 TypeScript Tools"]
+            OT1["radare2, ghidra, binwalk<br/>frida, angr, strings"]
+            OT2["semgrep, gitleaks, gau<br/>corscanner, whatweb"]
+            OT3["git_dumper, js_scraper<br/>crypto_solver, ropper"]
         end
 
         subgraph PROVIDERS["21 AI Providers"]
             direction LR
-            PR1["Anthropic<br/>OpenAI<br/>Groq"]
-            PR2["DeepSeek<br/>OpenRouter<br/>xAI"]
-            PR3["Ollama Local<br/>Cerebras<br/>Together"]
-            PR4["OpenCode Zen/Go<br/>+ 12 more"]
+            PR1["Anthropic / OpenAI / Groq"]
+            PR2["DeepSeek / Ollama / xAI"]
+            PR3["OpenRouter / Cerebras / Together"]
         end
 
-        OV_PROXY --> OV_API
-        OV_PROXY --> OV_FILES
+        OV_PROXY --> OV_AGENTS
+        OV_PROXY --> OV_TOOLS
         OV_PROXY --> PROVIDERS
     end
 
     subgraph DOCKER["Docker Deployment - docker-compose.yml"]
         direction LR
         DC1["xpfarm container<br/>Go app on :8888"]
-        DC2["overlord container<br/>OpenCode serve :3000<br/>radare2 + analysis tools"]
+        DC2["overlord container<br/>OpenCode serve :3000"]
         DC3["mobsf container<br/>Mobile scan :8000<br/>optional profile"]
         DC1 <-->|xpfarm-network| DC2
         DC1 <-->|xpfarm-network| DC3
@@ -226,30 +224,26 @@ flowchart TB
 
     subgraph NOTIFICATIONS["Notifications - internal/notifications/"]
         direction LR
-        N1["Discord Bot<br/>Embed notifications<br/>Scan start/stop alerts"]
-        N2["Telegram Bot<br/>Markdown messages<br/>Scan start/stop alerts"]
-    end
-
-    subgraph UTILS["Utilities - pkg/utils/"]
-        direction LR
-        U1["Gradient Logger<br/>Color-coded terminal output"]
-        U2["Cloudflare IP Detector<br/>IPv4 + IPv6 CIDR matching"]
-        U3["Binary Resolver<br/>PATH + GOPATH fallback"]
+        N1["Discord Bot"]
+        N2["Telegram Bot"]
     end
 
     %% Cross-component connections
     M7 --> GIN
     A1 --> SM
-    A2 --> SRCH
+    A2 --> NORM
     A3 --> OV_PROXY
-    SM -->|uses| IFACE
+    A9 --> PLUGIN_SDK
+    A10 --> NORM
+    A11 --> STORAGE
+    A12 --> STORAGE
+    A13 --> STORAGE
     SM -->|reads/writes| DB
+    SM -->|SSE broadcast| A6
     SM -->|callbacks| N1
     SM -->|callbacks| N2
-    PIPELINE -->|ResolveAndCheck| RESOLVE
-    PIPELINE -->|recordResult| DB
-    S5 -->|analyzes response| WAP
-    A8 -->|proxies| OA5
+    NORM --> STORAGE
+    STORAGE --> DB
 ```
 
 ## Why
@@ -272,6 +266,7 @@ The focus was on building a vuln scanner where you can also see what fails or ge
 - [CVEMap](https://github.com/projectdiscovery/cvemap) - CVE mapping
 
 ![Discovery Paths](img/Disc_Paths.png)
+
 #### Credits
 
 <table>
@@ -300,35 +295,81 @@ Overlord is a built-in AI agent powered by [OpenCode](https://opencode.ai) that 
 - **Session history** - switch between previous analysis sessions, auto-restored on page refresh
 - **Multi-provider support** - Anthropic, OpenAI, Groq, Ollama (local), and 15+ more
 - **Stop button** - abort long-running analysis at any time
+- **75 TypeScript tools** - radare2, Ghidra, Frida, binwalk, angr, Semgrep, Gitleaks, and more
+- **19 specialized agents** - binary RE, APK analysis, web testing, exploit generation, secrets hunting
 
 ![Overlord Status](img/O_status.png)
 
 ![Overlord Prompt](img/O_prompt.png)
 
-![Overlord Status](img/docker.png)
+## Plugin SDK
 
-## Random Screenshots
+XPFarm is extensible via a community Plugin SDK. Anyone can add new Tools, Agents, and Pipelines without touching core code.
 
-![Dashboard](img/discord.png)
+```
+plugins/
+├── all/all.go                    ← add your plugin import here
+├── example-echo/                 ← minimal starter template
+│   ├── plugin.go                 ← implement Tool/Agent, call Register* in init()
+│   └── plugin.yaml               ← name, version, author, description
+└── example-repo-scanner/         ← repo static-analysis example
+    ├── plugin.go
+    └── plugin.yaml
+```
 
-![Set Target](img/Set_target.png)
+**Writing a plugin — three steps:**
+1. Create `plugins/my-plugin/plugin.go` — implement `Tool` and/or `Agent`, call `plugin.RegisterTool()` / `plugin.RegisterAgent()` in `init()`
+2. Create `plugins/my-plugin/plugin.yaml` — metadata
+3. Add `_ "xpfarm/plugins/my-plugin"` to `plugins/all/all.go`
 
-![Port Scan](img/Port_Scan.png)
+**API:** `GET /api/plugins` lists all registered tools, agents, pipelines, and manifests.
 
-![Raw Logs](img/Raw_logs.png)
+## Finding Normalization Engine
+
+Raw scanner outputs from Nuclei, Nmap, Semgrep, and Gitleaks are normalized into a unified `Finding` model, enriched with live threat intelligence, deduplicated, and grouped.
+
+```
+POST /api/normalize  {"source": "nuclei", "raw": {...}}
+         │
+         ▼  Adapter (nuclei / nmap / semgrep / gitleaks)
+         │  → canonical Finding (CVE, CWE, severity, evidence, tags)
+         │
+         ▼  Enrichers (applied in order)
+         │  1. CWE   — 40-rule keyword trie + 35-tag map (local, instant)
+         │  2. CVSS  — NVD REST API v2, CVSS 3.1→3.0→2.0, in-process cache
+         │  3. EPSS  — FIRST.org exploitation probability API, in-process cache
+         │  4. KEV   — CISA Known Exploited Vulnerabilities catalog (sync.Once)
+         │
+         ▼  SHA-256 fingerprint → deduplicate → group by CWE/CVE/Severity/Target
+         │
+         ▼  SQLite storage (FindingRecord + GroupRecord)
+         │
+         ▼  {findings, groups, count}
+```
+
+**REST API:**
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/normalize` | Normalize raw scanner output, save and return findings |
+| `GET /api/findings` | List findings — filter by `source`, `severity`, `cwe`, `cve`, `target`, `kev` |
+| `GET /api/findings/:id` | Fetch a single finding by ID |
+| `GET /api/groups` | List finding groups with all member findings |
 
 ## What's New
 
-- **Secrets encrypted at rest** — API keys stored in SQLite are encrypted with AES-256-GCM. A local key file (`data/.xpfarm.key`) is auto-generated on first run and never committed.
-- **Real-time scan progress** — Dashboard now streams live stage updates via SSE instead of polling. See exactly which pipeline stage is running and how far along the scan is.
-- **Search pagination** — Search results are paginated (100 rows/page) with a truncation warning when results exceed the limit.
-- **Goroutine panic recovery** — Panics in scan goroutines are caught, logged, and cleaned up gracefully instead of crashing the server.
-- **CSRF protection** — Cross-origin POST requests are rejected. XPFarm only accepts state-mutating requests from localhost.
-- **File upload hardening** — Binary uploads are capped at 500 MB and validated by MIME type before saving.
-- **Silent failure surfaces** — CSV import errors, Nuclei parse failures, and search truncation are now reported to the user.
-- **Tool version pinning** — All 10 security tools in the Dockerfile are pinned to specific versions. Use `./xpfarm.sh update` to opt-in to upgrades.
-- **DB connection tuning** — Connection pool increased to 10 concurrent readers; WAL journal size capped at 64 MB.
-- **N+1 dashboard query fix** — Asset target counts now use a single `GROUP BY` query instead of loading every target object.
+- **Plugin SDK** — community-extensible Tool / Agent / Pipeline system; add a plugin in 3 steps
+- **Finding Normalization Engine** — unified model across Nuclei, Nmap, Semgrep, Gitleaks; live CVSS/EPSS/KEV enrichment; SHA-256 dedup; CWE/CVE/severity grouping
+- **Secrets encrypted at rest** — API keys stored in SQLite are encrypted with AES-256-GCM. Key file auto-generated at `data/.xpfarm.key`, never committed
+- **Real-time scan progress** — Dashboard streams live stage updates via SSE instead of polling
+- **Search pagination** — 100 rows/page with truncation warning when results exceed the limit
+- **Goroutine panic recovery** — Panics in scan goroutines are caught, logged, and cleaned up gracefully
+- **CSRF protection** — Cross-origin POST requests rejected; only localhost accepted
+- **File upload hardening** — Binary uploads capped at 500 MB, MIME type validated before saving
+- **Silent failure surfaces** — CSV import errors, Nuclei parse failures, and search truncation reported to user
+- **Tool version pinning** — All 10 security tools pinned in Dockerfile; `./xpfarm.sh update` for opt-in upgrades
+- **DB connection tuning** — 10 open / 5 idle connection pool; 64 MB WAL journal cap
+- **N+1 dashboard fix** — Asset target counts use a single `GROUP BY` query
 
 ## Setup
 
@@ -350,6 +391,18 @@ go build -o xpfarm
 ./xpfarm
 ./xpfarm -debug
 ```
+
+![Docker](img/docker.png)
+
+## Random Screenshots
+
+![Dashboard](img/discord.png)
+
+![Set Target](img/Set_target.png)
+
+![Port Scan](img/Port_Scan.png)
+
+![Raw Logs](img/Raw_logs.png)
 
 ## TODO
 
