@@ -29,6 +29,9 @@ import (
 	graphstore "xpfarm/internal/storage/graph"
 	repo_scanner "xpfarm/internal/repo_scanner"
 	"xpfarm/internal/repos"
+	"xpfarm/internal/reports"
+	"xpfarm/internal/reports/exporter"
+	reportstore "xpfarm/internal/storage/reports"
 	repostore "xpfarm/internal/storage/repos"
 	"xpfarm/pkg/utils"
 
@@ -2041,6 +2044,182 @@ func StartServer(port string) error {
 			"status": "indexed",
 			"count":  count,
 		})
+	})
+
+	// -------------------------------------------------------------------------
+	// Reports
+	// -------------------------------------------------------------------------
+
+	// GET /api/assets — return all assets as JSON (for report generator and other JS).
+	r.GET("/api/assets", func(c *gin.Context) {
+		var assets []database.Asset
+		database.GetDB().Select("id, name").Find(&assets)
+		c.JSON(http.StatusOK, gin.H{"assets": assets})
+	})
+
+	// GET /reports — serve the report generator UI page.
+	r.GET("/reports", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "reports.html", getGlobalContext(gin.H{"Page": "reports"}))
+	})
+
+	// POST /api/reports/generate — generate a new report from findings.
+	r.POST("/api/reports/generate", func(c *gin.Context) {
+		var req reports.ReportRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+			return
+		}
+		if len(req.AssetIDs) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "at least one asset_id is required"})
+			return
+		}
+		if req.Format == "" {
+			req.Format = reports.FormatMarkdown
+		}
+
+		// Build the Overlord generator function if Overlord is reachable.
+		var overlordGen func(data reports.ReportData, format reports.ReportFormat) (string, error)
+		if status := overlord.CheckConnection(); status.Connected {
+			overlordGen = func(data reports.ReportData, format reports.ReportFormat) (string, error) {
+				prompt, err := reports.BuildOverlordPrompt(data, format)
+				if err != nil {
+					return "", err
+				}
+				sess, err := overlord.CreateSession("Report: " + data.Title)
+				if err != nil {
+					return "", err
+				}
+				if err := overlord.SendPromptAsync(sess.ID, prompt, ""); err != nil {
+					return "", err
+				}
+				// Poll for completion (max 3 minutes, every 3 seconds)
+				deadline := time.Now().Add(3 * time.Minute)
+				var lastText string
+				var stableCount int
+				for time.Now().Before(deadline) {
+					time.Sleep(3 * time.Second)
+					messages, err := overlord.GetSessionMessages(sess.ID)
+					if err != nil {
+						continue
+					}
+					text := reports.ExtractAssistantText(messages)
+					if text != "" && text == lastText {
+						stableCount++
+						if stableCount >= 2 {
+							return text, nil
+						}
+					} else {
+						lastText = text
+						stableCount = 0
+					}
+				}
+				if lastText != "" {
+					return lastText, nil
+				}
+				return "", fmt.Errorf("overlord: timed out waiting for response")
+			}
+		}
+
+		report, err := reports.GenerateReport(c.Request.Context(), database.GetDB(), req, overlordGen)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Persist the report
+		if saveErr := reportstore.SaveReport(database.GetDB(), reportstore.ReportRecord{
+			ID:        report.ID,
+			Format:    string(report.Format),
+			Title:     report.Title,
+			Content:   report.Content,
+			Status:    string(report.Status),
+			CreatedAt: report.CreatedAt,
+		}); saveErr != nil {
+			// Non-fatal — still return the report to the client
+			utils.LogError("failed to save report: %v", saveErr)
+		}
+
+		c.JSON(http.StatusOK, report)
+	})
+
+	// GET /api/reports — list all saved reports.
+	r.GET("/api/reports", func(c *gin.Context) {
+		records, err := reportstore.ListReports(database.GetDB())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// Return summary (omit content for list view)
+		type reportSummary struct {
+			ID        string    `json:"id"`
+			Format    string    `json:"format"`
+			Title     string    `json:"title"`
+			Status    string    `json:"status"`
+			CreatedAt time.Time `json:"created_at"`
+		}
+		summaries := make([]reportSummary, len(records))
+		for i, r := range records {
+			summaries[i] = reportSummary{
+				ID:        r.ID,
+				Format:    r.Format,
+				Title:     r.Title,
+				Status:    r.Status,
+				CreatedAt: r.CreatedAt,
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"reports": summaries})
+	})
+
+	// GET /api/reports/:id — fetch a single report with full content.
+	r.GET("/api/reports/:id", func(c *gin.Context) {
+		rec, err := reportstore.GetReport(database.GetDB(), c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "report not found"})
+			return
+		}
+		c.JSON(http.StatusOK, rec)
+	})
+
+	// GET /api/reports/:id/download — download a report as file.
+	// ?format=pdf converts to PDF (requires wkhtmltopdf); default is raw Markdown.
+	r.GET("/api/reports/:id/download", func(c *gin.Context) {
+		rec, err := reportstore.GetReport(database.GetDB(), c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "report not found"})
+			return
+		}
+		dl := c.DefaultQuery("format", "md")
+		filename := "report-" + rec.ID
+		if dl == "pdf" {
+			pdfBytes, err := exporter.MarkdownToPDF(rec.Content)
+			if err != nil {
+				// Fall back to HTML
+				html := exporter.MarkdownToHTML(rec.Content)
+				c.Header("Content-Disposition", `attachment; filename="`+filename+`.html"`)
+				c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+				return
+			}
+			c.Header("Content-Disposition", `attachment; filename="`+filename+`.pdf"`)
+			c.Data(http.StatusOK, "application/pdf", pdfBytes)
+			return
+		}
+		if dl == "html" {
+			html := exporter.MarkdownToHTML(rec.Content)
+			c.Header("Content-Disposition", `attachment; filename="`+filename+`.html"`)
+			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+			return
+		}
+		c.Header("Content-Disposition", `attachment; filename="`+filename+`.md"`)
+		c.Data(http.StatusOK, "text/markdown; charset=utf-8", []byte(rec.Content))
+	})
+
+	// DELETE /api/reports/:id — delete a report.
+	r.DELETE("/api/reports/:id", func(c *gin.Context) {
+		if err := reportstore.DeleteReport(database.GetDB(), c.Param("id")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	})
 
 	return r.Run(":" + port)

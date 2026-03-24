@@ -1,0 +1,596 @@
+{{template "layout" .}}
+
+{{define "title"}}Bug Bounty Reports — XPFarm{{end}}
+
+{{define "content"}}
+<style>
+.reports-grid {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 20px;
+    height: calc(100vh - 120px);
+}
+.panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.panel-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-shrink: 0;
+}
+.panel-header h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+.panel-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+.form-group {
+    margin-bottom: 16px;
+}
+.form-group label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--color-text-muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.form-control {
+    width: 100%;
+    background: var(--bg-body);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--color-text-primary);
+    padding: 8px 12px;
+    font-size: 0.875rem;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+.form-control:focus {
+    outline: none;
+    border-color: var(--color-primary);
+}
+.asset-checkboxes {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+.asset-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+    cursor: pointer;
+    color: var(--color-text-primary);
+}
+.asset-checkbox input[type="checkbox"] {
+    accent-color: var(--color-primary);
+    width: 14px;
+    height: 14px;
+}
+.format-pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.format-pill {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-body);
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+}
+.format-pill.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: #fff;
+    font-weight: 600;
+}
+.btn-generate {
+    width: 100%;
+    padding: 10px;
+    background: var(--color-primary);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+.btn-generate:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.report-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 16px;
+}
+.report-item {
+    background: var(--bg-body);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+.report-item:hover, .report-item.selected {
+    border-color: var(--color-primary);
+}
+.report-item-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.report-item-meta {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.badge-format {
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.badge-format.markdown { background: #1e3a5f; color: #60a5fa; }
+.badge-format.pdf { background: #3b1a1a; color: #f87171; }
+.badge-format.hackerone { background: #2a1a0e; color: #fb923c; }
+.badge-format.bugcrowd { background: #1a2a1a; color: #4ade80; }
+.preview-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.btn-sm {
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-body);
+    color: var(--color-text-primary);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.btn-sm:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+}
+.btn-sm.danger:hover {
+    border-color: #ef4444;
+    color: #ef4444;
+}
+.preview-content {
+    flex: 1;
+    overflow-y: auto;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.82rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    color: var(--color-text-primary);
+    padding: 16px;
+    background: var(--bg-body);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+.preview-rendered {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+.preview-rendered h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; }
+.preview-rendered h2 { font-size: 1.15rem; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; margin-top: 24px; }
+.preview-rendered h3 { font-size: 1rem; margin-top: 18px; }
+.preview-rendered table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.82rem; }
+.preview-rendered th, .preview-rendered td { border: 1px solid var(--border-color); padding: 6px 10px; text-align: left; }
+.preview-rendered th { background: var(--bg-card); font-weight: 600; }
+.preview-rendered code { background: var(--bg-card); padding: 1px 4px; border-radius: 3px; font-size: 0.8em; }
+.preview-rendered pre { background: var(--bg-card); padding: 12px; border-radius: 6px; overflow-x: auto; }
+.preview-rendered blockquote { border-left: 3px solid var(--color-primary); margin: 8px 0; padding-left: 12px; color: var(--color-text-muted); }
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--color-text-muted);
+    gap: 12px;
+    text-align: center;
+}
+.empty-state svg { opacity: 0.3; }
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.toggle-raw { font-size: 0.75rem; color: var(--color-text-muted); cursor: pointer; }
+.toggle-raw.active { color: var(--color-primary); }
+</style>
+
+<div class="page-header">
+    <h2 class="page-title">Bug Bounty Reports</h2>
+    <p class="page-subtitle">Generate professional disclosure reports from scan findings</p>
+</div>
+
+<div class="reports-grid">
+    <!-- Left: Generator form + history -->
+    <div class="panel">
+        <div class="panel-header">
+            <h3>Generate Report</h3>
+        </div>
+        <div class="panel-body">
+            <div class="form-group">
+                <label>Assets to Include</label>
+                <div class="asset-checkboxes" id="assetList">
+                    <span style="color:var(--color-text-muted);font-size:0.8rem;">Loading assets...</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Report Format</label>
+                <div class="format-pills">
+                    <div class="format-pill active" data-format="markdown">Markdown</div>
+                    <div class="format-pill" data-format="pdf">PDF</div>
+                    <div class="format-pill" data-format="hackerone">HackerOne</div>
+                    <div class="format-pill" data-format="bugcrowd">Bugcrowd</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Report Title (optional)</label>
+                <input type="text" id="reportTitle" class="form-control" placeholder="Security Assessment Report">
+            </div>
+
+            <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" id="includeGraph" style="accent-color:var(--color-primary);width:14px;height:14px;">
+                <label for="includeGraph" style="margin:0;text-transform:none;letter-spacing:0;font-size:0.875rem;cursor:pointer;">Include attack graph context</label>
+            </div>
+
+            <button class="btn-generate" id="btnGenerate" onclick="generateReport()">
+                Generate Report
+            </button>
+
+            <div style="margin-top: 24px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                <div style="font-size:0.8rem;font-weight:600;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;">Saved Reports</div>
+                <div class="report-list" id="reportList">
+                    <span style="color:var(--color-text-muted);font-size:0.8rem;">No reports yet.</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right: Preview pane -->
+    <div class="panel" id="previewPanel">
+        <div class="panel-header">
+            <h3 id="previewTitle">Report Preview</h3>
+            <div class="preview-toolbar" id="previewToolbar" style="display:none;">
+                <span class="toggle-raw" id="toggleRaw" onclick="toggleRaw()">Raw</span>
+                <a class="btn-sm" id="dlMarkdown" href="#" target="_blank">⬇ .md</a>
+                <a class="btn-sm" id="dlHTML" href="#" target="_blank">⬇ HTML</a>
+                <a class="btn-sm" id="dlPDF" href="#" target="_blank">⬇ PDF</a>
+                <button class="btn-sm danger" onclick="deleteReport()">🗑 Delete</button>
+            </div>
+        </div>
+        <div id="previewEmpty" class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+            </svg>
+            <div>Select an asset and click Generate</div>
+            <div style="font-size:0.8rem;">Reports are saved automatically</div>
+        </div>
+        <div id="previewContent" style="display:none;flex:1;overflow:hidden;display:none;flex-direction:column;padding:0;">
+            <div id="previewRendered" class="preview-rendered"></div>
+            <pre id="previewRaw" class="preview-content" style="display:none;margin:16px;flex:1;"></pre>
+        </div>
+    </div>
+</div>
+
+<script>
+let selectedFormat = 'markdown';
+let selectedReportID = null;
+let showingRaw = false;
+
+// ---- Init ----
+document.addEventListener('DOMContentLoaded', () => {
+    loadAssets();
+    loadReports();
+
+    document.querySelectorAll('.format-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            document.querySelectorAll('.format-pill').forEach(p => p.classList.remove('active'));
+            pill.classList.add('active');
+            selectedFormat = pill.dataset.format;
+        });
+    });
+});
+
+// ---- Load assets ----
+async function loadAssets() {
+    const res = await fetch('/api/assets');
+    const data = await res.json();
+    const list = document.getElementById('assetList');
+    if (!data.assets || data.assets.length === 0) {
+        list.innerHTML = '<span style="color:var(--color-text-muted);font-size:0.8rem;">No assets found. Add targets first.</span>';
+        return;
+    }
+    list.innerHTML = data.assets.map(a => `
+        <label class="asset-checkbox">
+            <input type="checkbox" value="${a.id}" name="assetID">
+            ${escapeHTML(a.name)}
+        </label>
+    `).join('');
+}
+
+// ---- Load saved reports ----
+async function loadReports() {
+    const res = await fetch('/api/reports');
+    const data = await res.json();
+    const list = document.getElementById('reportList');
+    if (!data.reports || data.reports.length === 0) {
+        list.innerHTML = '<span style="color:var(--color-text-muted);font-size:0.8rem;">No reports yet.</span>';
+        return;
+    }
+    list.innerHTML = data.reports.map(r => `
+        <div class="report-item" id="ri-${r.id}" onclick="openReport('${r.id}')">
+            <div class="report-item-title">${escapeHTML(r.title)}</div>
+            <div class="report-item-meta">
+                <span class="badge-format ${r.format}">${r.format}</span>
+                <span>${new Date(r.created_at).toLocaleDateString()}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ---- Generate ----
+async function generateReport() {
+    const checkedBoxes = document.querySelectorAll('input[name="assetID"]:checked');
+    if (checkedBoxes.length === 0) {
+        alert('Select at least one asset.');
+        return;
+    }
+    const assetIDs = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+    const title = document.getElementById('reportTitle').value.trim();
+    const includeGraph = document.getElementById('includeGraph').checked;
+
+    const btn = document.getElementById('btnGenerate');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Generating…';
+
+    showPreviewLoading();
+
+    try {
+        const res = await fetch('/api/reports/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                asset_ids: assetIDs,
+                format: selectedFormat,
+                title: title || undefined,
+                include_graph: includeGraph,
+            }),
+        });
+        const report = await res.json();
+        if (!res.ok) {
+            showPreviewError(report.error || 'Generation failed');
+            return;
+        }
+        await loadReports();
+        displayReport(report);
+    } catch (e) {
+        showPreviewError(e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Generate Report';
+    }
+}
+
+// ---- Open saved report ----
+async function openReport(id) {
+    document.querySelectorAll('.report-item').forEach(el => el.classList.remove('selected'));
+    const el = document.getElementById('ri-' + id);
+    if (el) el.classList.add('selected');
+
+    showPreviewLoading();
+    const res = await fetch('/api/reports/' + id);
+    const rec = await res.json();
+    if (!res.ok) { showPreviewError('Failed to load report'); return; }
+    displayReport({
+        id: rec.id,
+        format: rec.format,
+        title: rec.title,
+        content: rec.content,
+        status: rec.status,
+    });
+}
+
+// ---- Display ----
+function displayReport(report) {
+    selectedReportID = report.id;
+    document.getElementById('previewTitle').textContent = report.title || 'Report Preview';
+    document.getElementById('previewEmpty').style.display = 'none';
+
+    const pc = document.getElementById('previewContent');
+    pc.style.display = 'flex';
+    pc.style.flexDirection = 'column';
+    pc.style.flex = '1';
+    pc.style.overflow = 'hidden';
+
+    document.getElementById('previewToolbar').style.display = 'flex';
+
+    // Set download links
+    document.getElementById('dlMarkdown').href = '/api/reports/' + report.id + '/download?format=md';
+    document.getElementById('dlHTML').href = '/api/reports/' + report.id + '/download?format=html';
+    document.getElementById('dlPDF').href = '/api/reports/' + report.id + '/download?format=pdf';
+
+    // Render Markdown → HTML for preview
+    document.getElementById('previewRendered').innerHTML = markdownToHTML(report.content || '');
+    document.getElementById('previewRaw').textContent = report.content || '';
+
+    // Reset to rendered view
+    showingRaw = false;
+    document.getElementById('previewRendered').style.display = 'block';
+    document.getElementById('previewRaw').style.display = 'none';
+    document.getElementById('toggleRaw').classList.remove('active');
+}
+
+function toggleRaw() {
+    showingRaw = !showingRaw;
+    document.getElementById('previewRendered').style.display = showingRaw ? 'none' : 'block';
+    document.getElementById('previewRaw').style.display = showingRaw ? 'block' : 'none';
+    document.getElementById('toggleRaw').classList.toggle('active', showingRaw);
+}
+
+// ---- Delete ----
+async function deleteReport() {
+    if (!selectedReportID) return;
+    if (!confirm('Delete this report?')) return;
+    await fetch('/api/reports/' + selectedReportID, {method: 'DELETE'});
+    selectedReportID = null;
+    document.getElementById('previewEmpty').style.display = 'flex';
+    document.getElementById('previewContent').style.display = 'none';
+    document.getElementById('previewToolbar').style.display = 'none';
+    document.getElementById('previewTitle').textContent = 'Report Preview';
+    await loadReports();
+}
+
+// ---- Preview states ----
+function showPreviewLoading() {
+    document.getElementById('previewEmpty').style.display = 'flex';
+    document.getElementById('previewEmpty').innerHTML = `
+        <div class="spinner" style="width:24px;height:24px;border-width:3px;"></div>
+        <div>Generating report…</div>
+        <div style="font-size:0.8rem;color:var(--color-text-muted);">This may take up to 3 minutes if Overlord is processing</div>
+    `;
+    document.getElementById('previewContent').style.display = 'none';
+    document.getElementById('previewToolbar').style.display = 'none';
+}
+
+function showPreviewError(msg) {
+    document.getElementById('previewEmpty').style.display = 'flex';
+    document.getElementById('previewEmpty').innerHTML = `
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <div style="color:#ef4444;">Generation failed</div>
+        <div style="font-size:0.8rem;color:var(--color-text-muted);max-width:280px;">${escapeHTML(msg)}</div>
+    `;
+}
+
+// ---- Lightweight Markdown → HTML renderer ----
+function markdownToHTML(md) {
+    let html = '';
+    const lines = md.split('\n');
+    let inPre = false, inUL = false, inOL = false, inTable = false, tableRows = [];
+
+    const flushTable = () => {
+        if (!tableRows.length) return;
+        let t = '<table>';
+        tableRows.forEach((row, i) => {
+            if (i === 1) return; // separator
+            const cells = row.replace(/^\||\|$/g, '').split('|');
+            const tag = i === 0 ? 'th' : 'td';
+            if (i === 0) t += '<thead>';
+            t += '<tr>' + cells.map(c => `<${tag}>${inline(c.trim())}</${tag}>`).join('') + '</tr>';
+            if (i === 0) t += '</thead><tbody>';
+        });
+        t += '</tbody></table>';
+        html += t;
+        tableRows = [];
+        inTable = false;
+    };
+
+    const inline = s => s
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+        .replace(/⚠️/g, '⚠️');
+
+    for (const rawLine of lines) {
+        const line = rawLine;
+        if (/^```/.test(line)) {
+            if (!inPre) { html += '<pre><code>'; inPre = true; }
+            else { html += '</code></pre>'; inPre = false; }
+            continue;
+        }
+        if (inPre) { html += escapeHTML(line) + '\n'; continue; }
+        if (/^\|.+\|/.test(line)) {
+            if (!inTable) { if (inUL) { html += '</ul>'; inUL = false; } if (inOL) { html += '</ol>'; inOL = false; } inTable = true; }
+            tableRows.push(line); continue;
+        }
+        if (inTable) flushTable();
+        if (/^# (.+)/.test(line)) { html += '<h1>' + inline(line.slice(2)) + '</h1>'; continue; }
+        if (/^## (.+)/.test(line)) { html += '<h2>' + inline(line.slice(3)) + '</h2>'; continue; }
+        if (/^### (.+)/.test(line)) { html += '<h3>' + inline(line.slice(4)) + '</h3>'; continue; }
+        if (/^#### (.+)/.test(line)) { html += '<h4>' + inline(line.slice(5)) + '</h4>'; continue; }
+        if (/^---+$/.test(line)) { html += '<hr>'; continue; }
+        if (/^> (.+)/.test(line)) { html += '<blockquote>' + inline(line.slice(2)) + '</blockquote>'; continue; }
+        if (/^\s*[-*]\s+(.+)/.test(line)) {
+            if (!inUL) { html += '<ul>'; inUL = true; }
+            html += '<li>' + inline(line.replace(/^\s*[-*]\s+/, '')) + '</li>'; continue;
+        } else if (inUL) { html += '</ul>'; inUL = false; }
+        if (/^\s*\d+\.\s+(.+)/.test(line)) {
+            if (!inOL) { html += '<ol>'; inOL = true; }
+            html += '<li>' + inline(line.replace(/^\s*\d+\.\s+/, '')) + '</li>'; continue;
+        } else if (inOL) { html += '</ol>'; inOL = false; }
+        if (!line.trim()) { html += '<br>'; continue; }
+        html += '<p>' + inline(line) + '</p>';
+    }
+    if (inUL) html += '</ul>';
+    if (inOL) html += '</ol>';
+    if (inTable) flushTable();
+    if (inPre) html += '</code></pre>';
+    return html;
+}
+
+function escapeHTML(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+{{end}}
