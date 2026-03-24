@@ -272,6 +272,25 @@ The focus was on building a vuln scanner where you can also see what fails or ge
 - [CVEMap](https://github.com/projectdiscovery/cvemap) - CVE mapping
 
 ![Discovery Paths](img/Disc_Paths.png)
+#### Credits
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/Asjidkalam">
+        <img src="https://github.com/Asjidkalam.png" width="50" style="border-radius:50%" alt="Asjidkalam"/><br/>
+        <sub>Asjidkalam</sub>
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/jamoski3112">
+        <img src="https://github.com/jamoski3112.png" width="50" style="border-radius:50%" alt="jamoski3112"/><br/>
+        <sub>jamoski3112</sub>
+      </a><br/>
+      <sub><a href="https://rahulr.in/reversing-a-cheap-ip-camera-to-root/">Research</a></sub>
+    </td>
+  </tr>
+</table>
 
 ## Overlord - AI Binary Analysis
 
