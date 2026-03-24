@@ -8,8 +8,11 @@ import (
 	"xpfarm/internal/core"
 	"xpfarm/internal/database"
 	"xpfarm/internal/modules"
+	"xpfarm/internal/plugin"
 	"xpfarm/internal/ui"
 	"xpfarm/pkg/utils"
+
+	_ "xpfarm/plugins/all" // compile-in all plugins via init()
 
 	"github.com/gin-gonic/gin"
 )
@@ -48,8 +51,15 @@ ____  ________________________
 	utils.LogInfo("Initializing Database...")
 	database.InitDB(*debugMode)
 
-	// 2. Register Modules
+	// 2. Register built-in modules
 	modules.InitModules()
+
+	// 2b. Log loaded plugins (registered via init() in plugins/all)
+	pluginTools := plugin.AllTools()
+	pluginAgents := plugin.AllAgents()
+	pluginPipelines := plugin.AllPipelines()
+	utils.LogInfo("Plugin SDK: %d tool(s), %d agent(s), %d pipeline(s) loaded",
+		len(pluginTools), len(pluginAgents), len(pluginPipelines))
 
 	// 3. Health Checks & Installation
 	utils.LogInfo("Checking Dependencies...")

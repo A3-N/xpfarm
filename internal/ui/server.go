@@ -20,6 +20,7 @@ import (
 	"xpfarm/internal/notifications/discord"
 	"xpfarm/internal/notifications/telegram"
 	"xpfarm/internal/overlord"
+	"xpfarm/internal/plugin"
 	"xpfarm/pkg/utils"
 
 	"github.com/gin-gonic/gin"
@@ -1621,6 +1622,46 @@ func StartServer(port string) error {
 		manager := core.GetManager()
 		active := manager.GetActiveScans()
 		c.JSON(http.StatusOK, gin.H{"active_scans": active})
+	})
+
+	// Plugin SDK — list all registered tools, agents, pipelines, and manifests.
+	r.GET("/api/plugins", func(c *gin.Context) {
+		type toolInfo struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		}
+		type agentInfo struct {
+			Name  string   `json:"name"`
+			Tools []string `json:"tools"`
+		}
+		type pipelineInfo struct {
+			Name  string               `json:"name"`
+			Steps []plugin.PipelineStep `json:"steps"`
+		}
+
+		var ts []toolInfo
+		for _, t := range plugin.AllTools() {
+			ts = append(ts, toolInfo{Name: t.Name(), Description: t.Description()})
+		}
+		var as []agentInfo
+		for _, a := range plugin.AllAgents() {
+			names := make([]string, 0, len(a.Tools()))
+			for _, t := range a.Tools() {
+				names = append(names, t.Name())
+			}
+			as = append(as, agentInfo{Name: a.Name(), Tools: names})
+		}
+		var ps []pipelineInfo
+		for name, steps := range plugin.AllPipelines() {
+			ps = append(ps, pipelineInfo{Name: name, Steps: steps})
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"tools":     ts,
+			"agents":    as,
+			"pipelines": ps,
+			"manifests": plugin.AllManifests(),
+		})
 	})
 
 	// SSE endpoint: real-time scan stage progress for the dashboard

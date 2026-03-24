@@ -1,0 +1,8 @@
+name: example-repo-scanner
+version: 1.0.0
+author: community
+description: Static-analysis scanner for source repositories. Currently ships mock findings. Replace Run() with a real Semgrep or Gitleaks exec.Command invocation.
+tools:
+  - repo-scanner
+agents:
+  - repo-scanner-agent

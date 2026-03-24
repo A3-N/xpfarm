@@ -1,0 +1,8 @@
+name: example-echo
+version: 1.0.0
+author: community
+description: Minimal echo plugin. Reflects any input map back as output. Useful for pipeline testing and as a copy-paste starter for new plugins.
+tools:
+  - echo
+agents:
+  - echo-agent
