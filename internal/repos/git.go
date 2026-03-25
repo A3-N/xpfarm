@@ -27,6 +27,7 @@ type RepoTarget struct {
 	Branch    string    `json:"branch"`
 	LocalPath string    `json:"local_path"`
 	LastScan  time.Time `json:"last_scan"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // WorkspacePath returns the local filesystem path where the repo is (or will be)

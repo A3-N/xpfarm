@@ -44,6 +44,7 @@ func (r RepoTargetRecord) ToRepoTarget() repos.RepoTarget {
 		Branch:    r.Branch,
 		LocalPath: r.LocalPath,
 		LastScan:  r.LastScan,
+		CreatedAt: r.CreatedAt,
 	}
 }
 
