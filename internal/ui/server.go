@@ -35,6 +35,9 @@ import (
 	repostore "xpfarm/internal/storage/repos"
 	"xpfarm/internal/planner"
 	planstore "xpfarm/internal/storage/plans"
+	"xpfarm/internal/distributed/controller"
+	jobstore "xpfarm/internal/storage/jobs"
+	workerstore "xpfarm/internal/storage/workers"
 	"xpfarm/pkg/utils"
 
 	"github.com/gin-gonic/gin"
@@ -2439,6 +2442,261 @@ func StartServer(port string) error {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+	})
+
+	// -------------------------------------------------------------------------
+	// Distributed Workers & Jobs
+	// -------------------------------------------------------------------------
+
+	// Instantiate the controller (starts background heartbeat monitor)
+	ctrl := controller.New(database.GetDB())
+	_ = ctrl // used by handlers below via closure
+
+	// workerAuth is a middleware that validates X-Worker-Token on worker-facing routes.
+	workerAuth := func(c *gin.Context) {
+		token := c.GetHeader("X-Worker-Token")
+		if token == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing X-Worker-Token"})
+			return
+		}
+		workerID, err := ctrl.ValidateToken(token)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
+		}
+		c.Set("workerID", workerID)
+		c.Next()
+	}
+
+	// GET /workers — serve the workers & jobs dashboard.
+	r.GET("/workers", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "workers.html", getGlobalContext(gin.H{"Page": "workers"}))
+	})
+
+	// ------------------------------------------------------------------
+	// Worker registration & heartbeat (no auth required on register)
+	// ------------------------------------------------------------------
+
+	// POST /api/workers/register — worker registers on startup.
+	// Body: { "id", "hostname", "address", "capabilities": [], "labels": [] }
+	r.POST("/api/workers/register", func(c *gin.Context) {
+		var req struct {
+			ID           string   `json:"id" binding:"required"`
+			Hostname     string   `json:"hostname"`
+			Address      string   `json:"address"`
+			Capabilities []string `json:"capabilities"`
+			Labels       []string `json:"labels"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		token, err := ctrl.RegisterWorker(req.ID, req.Hostname, req.Address, req.Capabilities, req.Labels)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"token": token, "worker_id": req.ID})
+	})
+
+	// POST /api/workers/heartbeat — worker pings every 10s.
+	// Requires X-Worker-Token.
+	r.POST("/api/workers/heartbeat", workerAuth, func(c *gin.Context) {
+		workerID := c.GetString("workerID")
+		if err := ctrl.Heartbeat(workerID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// GET /api/workers — list all registered workers (UI / admin use).
+	r.GET("/api/workers", func(c *gin.Context) {
+		workers, err := workerstore.ListWorkers(database.GetDB())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// Decode JSON columns for the response
+		type workerView struct {
+			ID           string    `json:"id"`
+			Hostname     string    `json:"hostname"`
+			Address      string    `json:"address"`
+			Capabilities []string  `json:"capabilities"`
+			Labels       []string  `json:"labels"`
+			Status       string    `json:"status"`
+			ActiveJobs   int       `json:"active_jobs"`
+			LastSeen     time.Time `json:"last_seen"`
+		}
+		out := make([]workerView, len(workers))
+		for i, w := range workers {
+			out[i] = workerView{
+				ID:           w.ID,
+				Hostname:     w.Hostname,
+				Address:      w.Address,
+				Capabilities: workerstore.UnmarshalStringSlice(w.Capabilities),
+				Labels:       workerstore.UnmarshalStringSlice(w.Labels),
+				Status:       w.Status,
+				ActiveJobs:   w.ActiveJobs,
+				LastSeen:     w.LastSeen,
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"workers": out})
+	})
+
+	// DELETE /api/workers/:id — deregister a worker.
+	r.DELETE("/api/workers/:id", func(c *gin.Context) {
+		if err := workerstore.DeleteWorker(database.GetDB(), c.Param("id")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+	})
+
+	// ------------------------------------------------------------------
+	// Job management (UI → controller)
+	// ------------------------------------------------------------------
+
+	// POST /api/jobs/create — enqueue a new job.
+	// Body: { "tool": "subfinder", "payload": { "target": "example.com" } }
+	r.POST("/api/jobs/create", func(c *gin.Context) {
+		var req struct {
+			Tool    string         `json:"tool" binding:"required"`
+			Payload map[string]any `json:"payload"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if req.Payload == nil {
+			req.Payload = map[string]any{}
+		}
+		job, err := ctrl.CreateJob(req.Tool, req.Payload)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, job)
+	})
+
+	// GET /api/jobs — list all jobs, optional ?status= filter.
+	r.GET("/api/jobs", func(c *gin.Context) {
+		status := c.Query("status")
+		jobs, err := jobstore.ListJobs(database.GetDB(), status)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// Decode payload/result JSON columns
+		type jobView struct {
+			ID        string         `json:"id"`
+			WorkerID  string         `json:"worker_id"`
+			Tool      string         `json:"tool"`
+			Payload   map[string]any `json:"payload"`
+			Status    string         `json:"status"`
+			Result    map[string]any `json:"result"`
+			Error     string         `json:"error,omitempty"`
+			CreatedAt time.Time      `json:"created_at"`
+			UpdatedAt time.Time      `json:"updated_at"`
+		}
+		out := make([]jobView, len(jobs))
+		for i, j := range jobs {
+			out[i] = jobView{
+				ID:        j.ID,
+				WorkerID:  j.WorkerID,
+				Tool:      j.Tool,
+				Payload:   jobstore.UnmarshalPayload(j.Payload),
+				Status:    j.Status,
+				Result:    jobstore.UnmarshalPayload(j.Result),
+				Error:     j.Error,
+				CreatedAt: j.CreatedAt,
+				UpdatedAt: j.UpdatedAt,
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"jobs": out})
+	})
+
+	// GET /api/jobs/:id — fetch a single job with full result.
+	r.GET("/api/jobs/:id", func(c *gin.Context) {
+		job, err := jobstore.GetJob(database.GetDB(), c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"id":         job.ID,
+			"worker_id":  job.WorkerID,
+			"tool":       job.Tool,
+			"payload":    jobstore.UnmarshalPayload(job.Payload),
+			"status":     job.Status,
+			"result":     jobstore.UnmarshalPayload(job.Result),
+			"error":      job.Error,
+			"created_at": job.CreatedAt,
+			"updated_at": job.UpdatedAt,
+		})
+	})
+
+	// DELETE /api/jobs/:id — remove a job.
+	r.DELETE("/api/jobs/:id", func(c *gin.Context) {
+		if err := jobstore.DeleteJob(database.GetDB(), c.Param("id")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+	})
+
+	// ------------------------------------------------------------------
+	// Worker ↔ Controller job handoff (authenticated)
+	// ------------------------------------------------------------------
+
+	// GET /api/workers/:id/jobs/next — worker polls for its next job.
+	// Returns 200 + job JSON if a job was claimed, or 204 No Content if queue empty.
+	r.GET("/api/workers/:id/jobs/next", workerAuth, func(c *gin.Context) {
+		workerID := c.GetString("workerID")
+
+		// Load capabilities from DB so the scheduler knows what this worker can run
+		w, err := workerstore.GetWorker(database.GetDB(), workerID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "worker not registered"})
+			return
+		}
+		tools := workerstore.UnmarshalStringSlice(w.Capabilities)
+
+		job, err := ctrl.ClaimNextJob(workerID, tools)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if job == nil {
+			c.Status(http.StatusNoContent)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"id":      job.ID,
+			"tool":    job.Tool,
+			"payload": jobstore.UnmarshalPayload(job.Payload),
+		})
+	})
+
+	// POST /api/workers/:id/jobs/:jobid/result — worker submits result.
+	r.POST("/api/workers/:id/jobs/:jobid/result", workerAuth, func(c *gin.Context) {
+		workerID := c.GetString("workerID")
+		jobID := c.Param("jobid")
+
+		var body struct {
+			Result map[string]any `json:"result"`
+			Error  string         `json:"error"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := ctrl.RecordJobResult(workerID, jobID, body.Result, body.Error); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "recorded"})
 	})
 
 	return r.Run(":" + port)
