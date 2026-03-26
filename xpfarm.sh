@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # XPFarm - Unified CLI
-# Usage: ./xpfarm.sh [build|up|onlyGo|down|help]
+# Usage: ./xpfarm.sh [build|up|debug|onlyGo|down|help]
 
 set -e
 
@@ -67,6 +67,18 @@ cmd_onlygo() {
     ./xpfarm "$@"
 }
 
+cmd_debug() {
+    require_docker
+    banner
+
+    # Ensure data directory exists
+    mkdir -p data
+
+    echo -e "\033[1;33mStarting XPFarm + Overlord in DEBUG mode...\033[0m"
+    docker compose up -d overlord
+    docker compose run --rm -p 8888:8888 xpfarm ./xpfarm -debug
+}
+
 cmd_down() {
     require_docker
     echo -e "\033[1mStopping all containers...\033[0m"
@@ -81,6 +93,7 @@ cmd_help() {
     echo "Commands:"
     echo -e "  \033[1mbuild\033[0m       Build the Docker containers (XPFarm + Overlord)"
     echo -e "  \033[1mup\033[0m          Start the environment (docker compose up)"
+    echo -e "  \033[1mdebug\033[0m       Start in debug mode (verbose logging + Gin debug)"
     echo -e "  \033[1monlyGo\033[0m      Compile and run Go binary directly (no Docker, no Overlord)"
     echo -e "  \033[1mdown\033[0m        Stop all Docker containers"
     echo -e "  \033[1mhelp\033[0m        Show this help message"
@@ -88,12 +101,14 @@ cmd_help() {
     echo "Examples:"
     echo -e "  ./xpfarm.sh build        # Build containers"
     echo -e "  ./xpfarm.sh up           # Start full stack"
+    echo -e "  ./xpfarm.sh debug        # Start with debug logging"
     echo -e "  ./xpfarm.sh onlyGo       # Dev mode, Go only"
 }
 
 case "${1:-help}" in
     build)    cmd_build ;;
     up)       cmd_up ;;
+    debug)    cmd_debug ;;
     onlyGo)   shift; cmd_onlygo "$@" ;;
     down)     cmd_down ;;
     help|*)   cmd_help ;;
