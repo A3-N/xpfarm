@@ -338,6 +338,5 @@ go build -o xpfarm
 
 ## TODO
 
-- [ ] SecretFinder JS
-- [ ] Repo detect/scan
-- [ ] Mobile scan
+- [ ] SecretFinder JS 4 Web
+- [ ] Repo detect/scan from domain
