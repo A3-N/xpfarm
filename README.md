@@ -2,6 +2,7 @@
 
 An open-source vulnerability scanner that wraps well-known open-source security tools behind a single web UI.
 
+![ADB](img/adb.png)
 ---
 
 ### Index
@@ -337,8 +338,6 @@ go build -o xpfarm
 
 ## TODO
 
-- [ ] Custom model
 - [ ] SecretFinder JS
 - [ ] Repo detect/scan
 - [ ] Mobile scan
-- [ ] Custom Module?
