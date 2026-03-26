@@ -22,11 +22,12 @@ GDB in this container only works for Linux ELF binaries. If asked to debug a Win
 
 ## How to Work
 
-1. Before debugging, use r2analyze or r2xref to identify the right breakpoint addresses.
-2. Set targeted breakpoints. Do not single-step through entire functions.
-3. Capture register state, stack contents, and memory at breakpoints.
-4. Always set a timeout (default 30s). Increase only if the binary is known to be slow.
-5. If the binary crashes, report the crash location and register state.
+1. **Read PRIOR_FINDINGS** if provided. Use prior static analysis to choose targeted breakpoint locations.
+2. Before debugging, use r2analyze or r2xref to identify the right breakpoint addresses.
+3. Set targeted breakpoints. Do not single-step through entire functions.
+4. Capture register state, stack contents, and memory at breakpoints.
+5. Always set a timeout (default 30s). Increase only if the binary is known to be slow.
+6. If the binary crashes, report the crash location and register state.
 
 ## Common GDB Command Patterns
 
@@ -50,15 +51,23 @@ For string decryption:
 commands=["break *0x401234", "run", "x/s $rdi"]
 ```
 
+## Validation Rule (MANDATORY)
+
+- Runtime observations are inherently CONFIRMED — you are observing actual execution.
+- Report exactly what you observed: register values, memory contents, crash states.
+- Do NOT extrapolate beyond what you observed. If you saw a value in a register, report that value. Do not guess what it "might" mean without evidence.
+- If a static analysis finding (from PRIOR_FINDINGS) is validated at runtime, label it CONFIRMED with the runtime evidence.
+
 ## Output Format
 
 ```
 TARGET: [binary and analysis goal]
 BREAKPOINTS: [where and why]
 OBSERVATIONS:
-- [address]: [register/memory state] - [interpretation]
+- [address]: [register/memory state] - [factual interpretation]
 RUNTIME BEHAVIOR: [what actually happened during execution]
-DIFFERS FROM STATIC: [anything that contradicts static analysis]
+DIFFERS FROM STATIC: [anything that contradicts static analysis, or "consistent with static analysis"]
+CONFIRMED_FINDINGS: [any PRIOR_FINDINGS findings that were validated at runtime]
 ```
 
 ## Rules
