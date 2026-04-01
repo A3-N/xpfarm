@@ -170,8 +170,10 @@ func StartServer(port string) error {
 	// --- Helper for Sidebar Data ---
 	getGlobalContext := func(data gin.H) gin.H {
 		var assets []database.Asset
-		// Preload Targets for sidebar dropdowns
-		database.GetDB().Preload("Targets").Find(&assets)
+		// Only load Target ID and Value for sidebar navigation to avoid pulling full objects into memory
+		database.GetDB().Preload("Targets", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id, asset_id, value")
+		}).Find(&assets)
 
 		data["SidebarAssets"] = assets
 		return data
@@ -224,25 +226,29 @@ func StartServer(port string) error {
 		var toolStats []ToolStat
 		db.Model(&database.ScanResult{}).Select("tool_name, count(*) as count").Group("tool_name").Scan(&toolStats)
 
-		// Chart Data: Targets per Asset
+		// Chart Data: Targets per Asset (SQL aggregation instead of loading all targets into memory)
 		type AssetStat struct {
 			ID    uint
 			Name  string
 			Count int
 		}
 		var assetStats []AssetStat
-		var allAssets []database.Asset
-		db.Preload("Targets").Find(&allAssets)
-		for _, a := range allAssets {
-			assetStats = append(assetStats, AssetStat{ID: a.ID, Name: a.Name, Count: len(a.Targets)})
-		}
+		db.Model(&database.Asset{}).
+			Select("assets.id, assets.name, COUNT(targets.id) as count").
+			Joins("LEFT JOIN targets ON targets.asset_id = assets.id AND targets.deleted_at IS NULL").
+			Where("assets.deleted_at IS NULL").
+			Group("assets.id").
+			Scan(&assetStats)
 
 		// Chart: Tech Stack Distribution (Top 10)
+		// Reuse the techMap already built above for unique tech counting
 		type LabelCount struct {
 			Label string
 			Count int
 		}
-		techMap := make(map[string]int)
+		var techChart []LabelCount
+		// Build actual counts in a single pass
+		techCountMap := make(map[string]int)
 		for _, stack := range techStacks {
 			if stack == "" {
 				continue
@@ -250,15 +256,14 @@ func StartServer(port string) error {
 			parts := strings.Split(stack, ", ")
 			for _, p := range parts {
 				if p != "" {
-					techMap[p]++
+					techCountMap[p]++
 				}
 			}
 		}
-		var techChart []LabelCount
-		for k, v := range techMap {
+		techChart = nil
+		for k, v := range techCountMap {
 			techChart = append(techChart, LabelCount{Label: k, Count: v})
 		}
-		// Sort by count desc
 		// Sort by count desc
 		sort.Slice(techChart, func(i, j int) bool {
 			return techChart[i].Count > techChart[j].Count
@@ -780,26 +785,19 @@ func StartServer(port string) error {
 		id := c.PostForm("id")
 		if id != "" {
 			db := database.GetDB()
-			// Manually cascade delete targets
-			// 1. Get Target IDs
-			var targets []database.Target
-			db.Select("id").Where("asset_id = ?", id).Find(&targets)
-			var targetIDs []uint
-			for _, t := range targets {
-				targetIDs = append(targetIDs, t.ID)
-			}
+			// Cascade delete using subqueries to avoid SQLite bind variable limits
+			// with large numbers of targets
+			targetSubquery := db.Model(&database.Target{}).Select("id").Where("asset_id = ?", id)
 
-			if len(targetIDs) > 0 {
-				// 2. Delete Related Data for these targets
-				db.Unscoped().Where("target_id IN ?", targetIDs).Delete(&database.ScanResult{})
-				db.Unscoped().Where("target_id IN ?", targetIDs).Delete(&database.Port{})
-				db.Unscoped().Where("target_id IN ?", targetIDs).Delete(&database.WebAsset{})
-				db.Unscoped().Where("target_id IN ?", targetIDs).Delete(&database.Vulnerability{})
-				db.Unscoped().Where("target_id IN ?", targetIDs).Delete(&database.CVE{})
-				// 3. Delete Targets
-				db.Unscoped().Delete(&database.Target{}, targetIDs)
-			}
-			// 4. Delete Asset
+			// 1. Delete Related Data for all targets belonging to this asset
+			db.Unscoped().Where("target_id IN (?)", targetSubquery).Delete(&database.ScanResult{})
+			db.Unscoped().Where("target_id IN (?)", targetSubquery).Delete(&database.Port{})
+			db.Unscoped().Where("target_id IN (?)", targetSubquery).Delete(&database.WebAsset{})
+			db.Unscoped().Where("target_id IN (?)", targetSubquery).Delete(&database.Vulnerability{})
+			db.Unscoped().Where("target_id IN (?)", targetSubquery).Delete(&database.CVE{})
+			// 2. Delete Targets
+			db.Unscoped().Where("asset_id = ?", id).Delete(&database.Target{})
+			// 3. Delete Asset
 			db.Unscoped().Delete(&database.Asset{}, id)
 		}
 		c.Redirect(http.StatusFound, "/assets")

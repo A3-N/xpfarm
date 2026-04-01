@@ -170,9 +170,10 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		utils.LogError("[Scanner] Error getting asset: %v", err)
 	}
 
-	// Fallback to default profile if missing
+	// Fallback to default profile if missing — persist to DB so user config is not lost
 	if asset.ScanProfile == nil {
-		asset.ScanProfile = &database.ScanProfile{
+		defaultProfile := database.ScanProfile{
+			Name:                     "Default " + assetName,
 			ExcludeCloudflare:        true,
 			ExcludeLocalhost:         true,
 			EnableSubfinder:          true,
@@ -192,6 +193,12 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 			EnableCvemap:             true,
 			EnableNuclei:             false,
 		}
+		if err := db.Create(&defaultProfile).Error; err != nil {
+			utils.LogError("[Scanner] Failed to persist default scan profile: %v", err)
+		} else {
+			db.Model(&asset).Update("scan_profile_id", defaultProfile.ID)
+		}
+		asset.ScanProfile = &defaultProfile
 	}
 	profile := asset.ScanProfile
 
@@ -646,115 +653,120 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 											if gwInstalled || katInstalled || urlInstalled {
 												utils.LogInfo("[Scanner] Triggering parallel web asset processing for %d URLs on %s", count, t.Value)
 
+												// Bounded worker pool: only spawn a fixed number of goroutines
+												// instead of one goroutine per URL (which causes thrashing at scale)
+												const webWorkers = 10
+												webJobsChan := make(chan modules.HttpxResult, webWorkers)
 												var webWG sync.WaitGroup
-												sem := make(chan struct{}, 10)
 
+												for i := 0; i < webWorkers; i++ {
+													webWG.Add(1)
+													go func() {
+														defer webWG.Done()
+														for webResult := range webJobsChan {
+															// --- Gowitness Screenshot ---
+															if gwInstalled {
+																shotPath, gwOut, gwErr := gowitnessMod.RunSingle(ctx, webResult.URL)
+																if gwOut != "" {
+																	recordResult(db, t.ID, "gowitness", gwOut)
+																}
+																if gwErr != nil {
+																	utils.LogDebug("[Scanner] Gowitness failed for %s: %v", webResult.URL, gwErr)
+																} else {
+																	if _, statErr := os.Stat(shotPath); statErr == nil {
+																		db.Model(&database.WebAsset{}).
+																			Where("target_id = ? AND url = ?", t.ID, webResult.URL).
+																			Update("screenshot", shotPath)
+																	}
+																}
+															}
+
+															// --- Katana & URLFinder ---
+															uniquePaths := make(map[string]bool)
+															var pathsList []string
+
+															processOutput := func(rawOutput string) {
+																lines := strings.Split(rawOutput, "\n")
+																for _, line := range lines {
+																	line = strings.TrimSpace(line)
+																	if line == "" {
+																		continue
+																	}
+																	if strings.HasPrefix(line, "http") {
+																		u, parseErr := url.Parse(line)
+																		if parseErr == nil && u.Path != "" {
+																			pathVal := u.Path
+																			if !uniquePaths[pathVal] {
+																				uniquePaths[pathVal] = true
+																				pathsList = append(pathsList, pathVal)
+																			}
+																		} else if parseErr == nil {
+																			if !uniquePaths["/"] {
+																				uniquePaths["/"] = true
+																				pathsList = append(pathsList, "/")
+																			}
+																		}
+																	} else {
+																		if !uniquePaths[line] {
+																			uniquePaths[line] = true
+																			pathsList = append(pathsList, line)
+																		}
+																	}
+																}
+															}
+
+															if katInstalled {
+																// Run Katana
+																args := []string{"-jc", "-kf", "all", "-fx", "-d", "5", "-pc", "-c", "20"}
+																katanaOutput, katErr := katanaMod.RunCustom(ctx, webResult.URL, args)
+																recordResult(db, t.ID, "katana", katanaOutput)
+																if katErr == nil {
+																	processOutput(katanaOutput)
+																}
+															}
+
+															if urlInstalled {
+																// Run URLFinder
+																u, parseErr := url.Parse(webResult.URL)
+																if parseErr == nil && u.Host != "" {
+																	urlHostname := u.Hostname()
+																	if urlHostname != "" {
+																		urlOutput, urlErr := urlMod.Run(ctx, urlHostname)
+																		recordResult(db, t.ID, "urlfinder", urlOutput)
+																		if urlErr == nil {
+																			processOutput(urlOutput)
+																		}
+																	}
+																}
+															}
+
+															// Save combined paths if either ran
+															if katInstalled || urlInstalled {
+																sort.Strings(pathsList)
+																if len(pathsList) > 0 {
+																	jsonBytes, jsonErr := json.Marshal(pathsList)
+																	if jsonErr != nil {
+																		utils.LogError("[Scanner] Failed to marshal paths: %v", jsonErr)
+																	} else {
+																		db.Model(&database.WebAsset{}).
+																			Where("target_id = ? AND url = ?", t.ID, webResult.URL).
+																			Update("katana_output", string(jsonBytes)) // stored in katana_output field for legacy reasons
+																	}
+																}
+															}
+														}
+													}()
+												}
+
+												// Feed URLs into the worker pool
 												for _, w := range webResults {
 													if w.URL == "" {
 														continue
 													}
-
-													webWG.Add(1)
-													go func(webResult modules.HttpxResult) {
-														defer webWG.Done()
-														sem <- struct{}{}
-														defer func() { <-sem }()
-
-														// --- Gowitness Screenshot ---
-														if gwInstalled {
-															shotPath, gwOut, gwErr := gowitnessMod.RunSingle(ctx, webResult.URL)
-															if gwOut != "" {
-																recordResult(db, t.ID, "gowitness", gwOut)
-															}
-															if gwErr != nil {
-																utils.LogDebug("[Scanner] Gowitness failed for %s: %v", webResult.URL, gwErr)
-															} else {
-																if _, statErr := os.Stat(shotPath); statErr == nil {
-																	db.Model(&database.WebAsset{}).
-																		Where("target_id = ? AND url = ?", t.ID, webResult.URL).
-																		Update("screenshot", shotPath)
-																}
-															}
-														}
-
-														// --- Katana & URLFinder ---
-														uniquePaths := make(map[string]bool)
-														var pathsList []string
-														var pathsMu sync.Mutex
-
-														processOutput := func(rawOutput string) {
-															lines := strings.Split(rawOutput, "\n")
-															pathsMu.Lock()
-															defer pathsMu.Unlock()
-															for _, line := range lines {
-																line = strings.TrimSpace(line)
-																if line == "" {
-																	continue
-																}
-																if strings.HasPrefix(line, "http") {
-																	u, parseErr := url.Parse(line)
-																	if parseErr == nil && u.Path != "" {
-																		pathVal := u.Path
-																		if !uniquePaths[pathVal] {
-																			uniquePaths[pathVal] = true
-																			pathsList = append(pathsList, pathVal)
-																		}
-																	} else if parseErr == nil {
-																		if !uniquePaths["/"] {
-																			uniquePaths["/"] = true
-																			pathsList = append(pathsList, "/")
-																		}
-																	}
-																} else {
-																	if !uniquePaths[line] {
-																		uniquePaths[line] = true
-																		pathsList = append(pathsList, line)
-																	}
-																}
-															}
-														}
-
-														if katInstalled {
-															// Run Katana
-															args := []string{"-jc", "-kf", "all", "-fx", "-d", "5", "-pc", "-c", "20"}
-															katanaOutput, katErr := katanaMod.RunCustom(ctx, webResult.URL, args)
-															recordResult(db, t.ID, "katana", katanaOutput)
-															if katErr == nil {
-																processOutput(katanaOutput)
-															}
-														}
-
-														if urlInstalled {
-															// Run URLFinder
-															u, parseErr := url.Parse(webResult.URL)
-															if parseErr == nil && u.Host != "" {
-																urlHostname := u.Hostname()
-																if urlHostname != "" {
-																	urlOutput, urlErr := urlMod.Run(ctx, urlHostname)
-																	recordResult(db, t.ID, "urlfinder", urlOutput)
-																	if urlErr == nil {
-																		processOutput(urlOutput)
-																	}
-																}
-															}
-														}
-
-														// Save combined paths if either ran
-														if katInstalled || urlInstalled {
-															sort.Strings(pathsList)
-															if len(pathsList) > 0 {
-																jsonBytes, jsonErr := json.Marshal(pathsList)
-																if jsonErr != nil {
-																	utils.LogError("[Scanner] Failed to marshal paths: %v", jsonErr)
-																} else {
-																	db.Model(&database.WebAsset{}).
-																		Where("target_id = ? AND url = ?", t.ID, webResult.URL).
-																		Update("katana_output", string(jsonBytes)) // stored in katana_output field for legacy reasons
-																}
-															}
-														}
-													}(w)
+													webJobsChan <- w
 												}
+												close(webJobsChan)
+												webWG.Wait()
 												webWG.Wait()
 											}
 										}
