@@ -42,11 +42,12 @@ func InitDB(debug bool) {
 			log.Printf("Warning: failed to set busy_timeout: %v", err)
 		}
 
-		// Prevent "database is locked" during heavy concurrent scanning
-		// Serialize all write operations to SQLite by limiting to a single connection.
-		// WAL mode allows concurrent reads while one connection is writing.
-		sqlDB.SetMaxOpenConns(1)
-		sqlDB.SetMaxIdleConns(1)
+		// WAL mode allows concurrent reads while serializing writes.
+		// Allow multiple connections so read queries (dashboard, API, sidebar)
+		// don't queue behind scan write operations. SQLite handles write
+		// serialization internally via WAL + busy_timeout.
+		sqlDB.SetMaxOpenConns(10)
+		sqlDB.SetMaxIdleConns(5)
 	}
 
 	// Migrate the schema
