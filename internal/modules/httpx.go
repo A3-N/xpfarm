@@ -1,7 +1,7 @@
 package modules
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -65,10 +65,14 @@ func (h *HttpxResult) GetCNAME() string {
 	return strings.Join(h.CNAMEs, ", ")
 }
 
-// RunRich takes a list of URLs and runs rich analysis
-func (h *Httpx) RunRich(ctx context.Context, urls []string) ([]HttpxResult, error) {
+// RunRichStream takes a list of URLs and streams results one at a time through a channel.
+// This avoids buffering all results (including full HTTP response bodies) in memory at once.
+// The channel is closed when processing is complete.
+func (h *Httpx) RunRichStream(ctx context.Context, urls []string, results chan<- HttpxResult) error {
+	defer close(results)
+
 	if len(urls) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	utils.LogInfo("Running httpx rich scan on %d urls...", len(urls))
@@ -86,9 +90,21 @@ func (h *Httpx) RunRich(ctx context.Context, urls []string) ([]HttpxResult, erro
 	// Stdin Pipe for URLs
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	cmd.Stderr = utils.GetInfoWriter()
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("httpx failed to start: %v", err)
+	}
+
+	// Feed URLs to stdin
 	go func() {
 		defer stdin.Close()
 		for _, u := range urls {
@@ -98,35 +114,62 @@ func (h *Httpx) RunRich(ctx context.Context, urls []string) ([]HttpxResult, erro
 		}
 	}()
 
-	// Separate stdout and stderr
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Stream results line by line — each result is parsed and sent immediately,
+	// so the response body is only held in memory for one result at a time.
+	scanner := bufio.NewScanner(stdout)
+	// Increase scanner buffer for large responses (1MB max per line)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
-	cmdErr := cmd.Run()
-	if stderr.Len() > 0 {
-		utils.LogDebug("[Httpx] stderr: %s", stderr.String())
-	}
-
-	var results []HttpxResult
-	lines := strings.Split(stdout.String(), "\n")
-	for _, line := range lines {
+	for scanner.Scan() {
+		line := scanner.Text()
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		var res HttpxResult
 		if err := json.Unmarshal([]byte(line), &res); err != nil {
 			utils.LogDebug("[Httpx] Failed to parse JSON line: %v (line: %.100s)", err, line)
-		} else {
-			results = append(results, res)
+			continue
+		}
+		select {
+		case results <- res:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 
-	// If command failed AND we got no results, propagate the error
-	if cmdErr != nil && len(results) == 0 {
-		return nil, fmt.Errorf("httpx failed: %v", cmdErr)
+	if err := cmd.Wait(); err != nil {
+		utils.LogDebug("[Httpx] Command finished with error: %v", err)
 	}
 
+	return nil
+}
+
+// RunRich is a convenience wrapper that collects all streamed results into a slice.
+// WARNING: Buffers all results (including HTTP response bodies) in memory.
+// Use RunRichStream for large-scale scans to avoid memory pressure.
+// Results are capped at 5000 to prevent OOM on very large scans.
+func (h *Httpx) RunRich(ctx context.Context, urls []string) ([]HttpxResult, error) {
+	const maxResults = 5000
+	ch := make(chan HttpxResult, 50)
+	var streamErr error
+
+	go func() {
+		streamErr = h.RunRichStream(ctx, urls, ch)
+	}()
+
+	var results []HttpxResult
+	for res := range ch {
+		results = append(results, res)
+		if len(results) >= maxResults {
+			// Drain remaining to avoid blocking the producer
+			go func() { for range ch {} }()
+			break
+		}
+	}
+
+	if streamErr != nil && len(results) == 0 {
+		return nil, streamErr
+	}
 	return results, nil
 }
 

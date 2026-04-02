@@ -71,6 +71,31 @@
             box-sizing: border-box;
         }
 
+        /* Global Scrollbar Theme */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-body);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #2a2a2e;
+            border-radius: 4px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3a3a40;
+        }
+
+        ::-webkit-scrollbar-corner {
+            background: var(--bg-body);
+        }
+
         body {
             font-family: 'Inter', sans-serif;
             background-color: var(--bg-body);
@@ -79,6 +104,7 @@
             display: flex;
             height: 100vh;
             overflow: hidden;
+            scrollbar-color: #2a2a2e var(--bg-body);
         }
 
         /* Animations */

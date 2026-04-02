@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"xpfarm/internal/core"
@@ -26,6 +28,57 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// --- Sidebar Cache ---
+type sidebarCache struct {
+	mu        sync.RWMutex
+	assets    []database.Asset
+	cachedAt  time.Time
+	cacheTTL  time.Duration
+}
+
+var sbCache = &sidebarCache{cacheTTL: 30 * time.Second}
+
+func (sc *sidebarCache) get() []database.Asset {
+	sc.mu.RLock()
+	if time.Since(sc.cachedAt) < sc.cacheTTL && sc.assets != nil {
+		result := sc.assets
+		sc.mu.RUnlock()
+		return result
+	}
+	sc.mu.RUnlock()
+
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	// Double-check after acquiring write lock
+	if time.Since(sc.cachedAt) < sc.cacheTTL && sc.assets != nil {
+		return sc.assets
+	}
+
+	var assets []database.Asset
+	database.GetDB().Preload("Targets", func(db *gorm.DB) *gorm.DB {
+		return db.Select("id, asset_id, value")
+	}).Find(&assets)
+	sc.assets = assets
+	sc.cachedAt = time.Now()
+	return assets
+}
+
+func (sc *sidebarCache) invalidate() {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.cachedAt = time.Time{}
+}
+
+// --- Dashboard Stat Cache ---
+type dashboardCache struct {
+	mu       sync.RWMutex
+	data     gin.H
+	cachedAt time.Time
+	cacheTTL time.Duration
+}
+
+var dashCache = &dashboardCache{cacheTTL: 30 * time.Second}
 
 //go:embed templates/* static/*
 var f embed.FS
@@ -121,17 +174,48 @@ func StartServer(port string) error {
 		}
 	}
 
-	// Notification Clients
-	var discordClient *discord.Client
-	var telegramClient *telegram.Client
+	// --- Notification State (mutex-protected for safe re-init) ---
+	type notificationState struct {
+		mu             sync.Mutex
+		discordClient  *discord.Client
+		telegramClient *telegram.Client
+	}
+	notifState := &notificationState{}
 	manager := core.GetManager()
+
+	// rebuildCallbacks re-registers the scan start/stop callbacks to include
+	// ALL current notification clients. Must be called under notifState.mu.
+	rebuildCallbacks := func() {
+		dc := notifState.discordClient
+		tc := notifState.telegramClient
+		manager.SetOnStart(func(target string) {
+			if dc != nil {
+				dc.SendNotification("🚀 Scan Started", "Started scanning target: **"+target+"**", 0x34d399)
+			}
+			if tc != nil {
+				if err := tc.SendNotification(fmt.Sprintf("*🚀 Scan Started*\nStarted scanning target: `%s`", target)); err != nil {
+					utils.LogError("Telegram notification failed: %v", err)
+				}
+			}
+		})
+		manager.SetOnStop(func(target string, cancelled bool) {
+			if dc != nil {
+				dc.SendNotification("🏁 Scan Ended", "Scanning finished or stopped for: **"+target+"**", 0x8b5cf6)
+			}
+			if tc != nil {
+				if err := tc.SendNotification(fmt.Sprintf("*🏁 Scan Ended*\nScanning finished or stopped for: `%s`", target)); err != nil {
+					utils.LogError("Telegram notification failed: %v", err)
+				}
+			}
+		})
+	}
 
 	// Init Discord
 	if discordToken != "" {
 		dc, err := discord.NewClient(discordToken, discordChannel, manager)
 		if err == nil {
 			if err := dc.Start(); err == nil {
-				discordClient = dc
+				notifState.discordClient = dc
 			} else {
 				os.Stderr.WriteString("Failed to start Discord bot: " + err.Error() + "\n")
 			}
@@ -142,40 +226,15 @@ func StartServer(port string) error {
 
 	// Init Telegram
 	if telegramToken != "" && telegramChatID != "" {
-		telegramClient = telegram.NewClient(telegramToken, telegramChatID)
+		notifState.telegramClient = telegram.NewClient(telegramToken, telegramChatID)
 	}
 
-	// Hook up callbacks (Broadcast)
-	manager.SetOnStart(func(target string) {
-		if discordClient != nil {
-			discordClient.SendNotification("🚀 Scan Started", "Started scanning target: **"+target+"**", 0x34d399)
-		}
-		if telegramClient != nil {
-			if err := telegramClient.SendNotification(fmt.Sprintf("*🚀 Scan Started*\nStarted scanning target: `%s`", target)); err != nil {
-				utils.LogError("Telegram notification failed: %v", err)
-			}
-		}
-	})
-	manager.SetOnStop(func(target string, cancelled bool) {
-		if discordClient != nil {
-			discordClient.SendNotification("🏁 Scan Ended", "Scanning finished or stopped for: **"+target+"**", 0x8b5cf6)
-		}
-		if telegramClient != nil {
-			if err := telegramClient.SendNotification(fmt.Sprintf("*🏁 Scan Ended*\nScanning finished or stopped for: `%s`", target)); err != nil {
-				utils.LogError("Telegram notification failed: %v", err)
-			}
-		}
-	})
+	// Hook up initial callbacks
+	rebuildCallbacks()
 
-	// --- Helper for Sidebar Data ---
+	// --- Helper for Sidebar Data (Cached) ---
 	getGlobalContext := func(data gin.H) gin.H {
-		var assets []database.Asset
-		// Only load Target ID and Value for sidebar navigation to avoid pulling full objects into memory
-		database.GetDB().Preload("Targets", func(db *gorm.DB) *gorm.DB {
-			return db.Select("id, asset_id, value")
-		}).Find(&assets)
-
-		data["SidebarAssets"] = assets
+		data["SidebarAssets"] = sbCache.get()
 		return data
 	}
 
@@ -198,145 +257,195 @@ func StartServer(port string) error {
 		var portsCount int64
 		db.Model(&database.Port{}).Count(&portsCount)
 
-		// Tech Stack Count (Unique technologies)
-		var techStacks []string
-		db.Model(&database.WebAsset{}).Pluck("tech_stack", &techStacks)
-		uniqueTech := make(map[string]bool)
-		for _, stack := range techStacks {
-			if stack == "" {
-				continue
-			}
-			techs := strings.Split(stack, ", ")
-			for _, t := range techs {
-				if t != "" {
-					uniqueTech[t] = true
-				}
-			}
+		// Check dashboard cache for expensive aggregations
+		dashCache.mu.RLock()
+		cachedValid := time.Since(dashCache.cachedAt) < dashCache.cacheTTL && dashCache.data != nil
+		var cachedData gin.H
+		if cachedValid {
+			cachedData = dashCache.data
 		}
-		techCount := len(uniqueTech)
+		dashCache.mu.RUnlock()
 
-		// Tools Count (Installed/Available)
-		toolsCount := len(modules.GetAll())
-
-		// Chart Data: Results per Tool
-		type ToolStat struct {
+		var techCount int
+		var techChart []struct {
+			Label string
+			Count int
+		}
+		var webServerStats []struct {
+			Label string
+			Count int
+		}
+		var portStats []struct {
+			Label string
+			Count int
+		}
+		var serviceStats []struct {
+			Label string
+			Count int
+		}
+		var toolStats []struct {
 			ToolName string
 			Count    int64
 		}
-		var toolStats []ToolStat
-		db.Model(&database.ScanResult{}).Select("tool_name, count(*) as count").Group("tool_name").Scan(&toolStats)
-
-		// Chart Data: Targets per Asset (SQL aggregation instead of loading all targets into memory)
-		type AssetStat struct {
+		var assetStats []struct {
 			ID    uint
 			Name  string
 			Count int
 		}
-		var assetStats []AssetStat
-		db.Model(&database.Asset{}).
-			Select("assets.id, assets.name, COUNT(targets.id) as count").
-			Joins("LEFT JOIN targets ON targets.asset_id = assets.id AND targets.deleted_at IS NULL").
-			Where("assets.deleted_at IS NULL").
-			Group("assets.id").
-			Scan(&assetStats)
+		var vulnStats gin.H
 
-		// Chart: Tech Stack Distribution (Top 10)
-		// Reuse the techMap already built above for unique tech counting
-		type LabelCount struct {
-			Label string
-			Count int
-		}
-		var techChart []LabelCount
-		// Build actual counts in a single pass
-		techCountMap := make(map[string]int)
-		for _, stack := range techStacks {
-			if stack == "" {
-				continue
-			}
-			parts := strings.Split(stack, ", ")
-			for _, p := range parts {
-				if p != "" {
-					techCountMap[p]++
+		if cachedValid {
+			// Use cached data for expensive aggregations
+			techCount = cachedData["techCount"].(int)
+			techChart = cachedData["techChart"].([]struct {
+				Label string
+				Count int
+			})
+			webServerStats = cachedData["webServerStats"].([]struct {
+				Label string
+				Count int
+			})
+			portStats = cachedData["portStats"].([]struct {
+				Label string
+				Count int
+			})
+			serviceStats = cachedData["serviceStats"].([]struct {
+				Label string
+				Count int
+			})
+			toolStats = cachedData["toolStats"].([]struct {
+				ToolName string
+				Count    int64
+			})
+			assetStats = cachedData["assetStats"].([]struct {
+				ID    uint
+				Name  string
+				Count int
+			})
+			vulnStats = cachedData["vulnStats"].(gin.H)
+		} else {
+			// Compute and cache
+
+			// Tech Stack Count (Unique technologies) — limit to 500 entries to cap memory
+			var techStacks []string
+			db.Model(&database.WebAsset{}).Where("tech_stack != ''").Limit(500).Pluck("tech_stack", &techStacks)
+			techCountMap := make(map[string]int)
+			for _, stack := range techStacks {
+				parts := strings.Split(stack, ", ")
+				for _, p := range parts {
+					if p != "" {
+						techCountMap[p]++
+					}
 				}
 			}
-		}
-		techChart = nil
-		for k, v := range techCountMap {
-			techChart = append(techChart, LabelCount{Label: k, Count: v})
-		}
-		// Sort by count desc
-		sort.Slice(techChart, func(i, j int) bool {
-			return techChart[i].Count > techChart[j].Count
-		})
-		if len(techChart) > 10 {
-			techChart = techChart[:10]
-		}
+			techCount = len(techCountMap)
 
-		// Chart: Web Server Distribution
-		var webServerStats []LabelCount
-		db.Model(&database.WebAsset{}).
-			Select("web_server as label, count(*) as count").
-			Where("web_server != ''").
-			Group("web_server").
-			Order("count desc").
-			Limit(10).
-			Scan(&webServerStats)
-
-		// Chart: Port Distribution (Top 10)
-		var portStats []LabelCount
-		db.Model(&database.Port{}).
-			Select("port as label, count(*) as count").
-			Group("port").
-			Order("count desc").
-			Limit(10).
-			Scan(&portStats)
-
-		// Chart: Top Services
-		var serviceStats []LabelCount
-		db.Model(&database.Port{}).
-			Select("service as label, count(*) as count").
-			Where("service != ''").
-			Group("service").
-			Order("count desc").
-			Limit(10).
-			Scan(&serviceStats)
-
-		// Vulnerability Stats for Dashboard
-		var vulnTotalCount int64
-		db.Model(&database.Vulnerability{}).Count(&vulnTotalCount)
-
-		type SevCount struct {
-			Severity string
-			Count    int64
-		}
-		var sevCounts []SevCount
-		db.Model(&database.Vulnerability{}).
-			Select("severity, count(*) as count").
-			Group("severity").
-			Scan(&sevCounts)
-
-		vulnStats := gin.H{
-			"Total":    vulnTotalCount,
-			"Critical": int64(0),
-			"High":     int64(0),
-			"Medium":   int64(0),
-			"Low":      int64(0),
-			"Info":     int64(0),
-		}
-		for _, sc := range sevCounts {
-			switch sc.Severity {
-			case "critical":
-				vulnStats["Critical"] = sc.Count
-			case "high":
-				vulnStats["High"] = sc.Count
-			case "medium":
-				vulnStats["Medium"] = sc.Count
-			case "low":
-				vulnStats["Low"] = sc.Count
-			case "info":
-				vulnStats["Info"] = sc.Count
+			// Tech Chart (Top 10)
+			for k, v := range techCountMap {
+				techChart = append(techChart, struct {
+					Label string
+					Count int
+				}{Label: k, Count: v})
 			}
+			sort.Slice(techChart, func(i, j int) bool {
+				return techChart[i].Count > techChart[j].Count
+			})
+			if len(techChart) > 10 {
+				techChart = techChart[:10]
+			}
+
+			// Tool Stats
+			db.Model(&database.ScanResult{}).Select("tool_name, count(*) as count").Group("tool_name").Scan(&toolStats)
+
+			// Asset Stats
+			db.Model(&database.Asset{}).
+				Select("assets.id, assets.name, COUNT(targets.id) as count").
+				Joins("LEFT JOIN targets ON targets.asset_id = assets.id AND targets.deleted_at IS NULL").
+				Where("assets.deleted_at IS NULL").
+				Group("assets.id").
+				Scan(&assetStats)
+
+			// Web Server Distribution
+			db.Model(&database.WebAsset{}).
+				Select("web_server as label, count(*) as count").
+				Where("web_server != ''").
+				Group("web_server").
+				Order("count desc").
+				Limit(10).
+				Scan(&webServerStats)
+
+			// Port Distribution
+			db.Model(&database.Port{}).
+				Select("port as label, count(*) as count").
+				Group("port").
+				Order("count desc").
+				Limit(10).
+				Scan(&portStats)
+
+			// Top Services
+			db.Model(&database.Port{}).
+				Select("service as label, count(*) as count").
+				Where("service != ''").
+				Group("service").
+				Order("count desc").
+				Limit(10).
+				Scan(&serviceStats)
+
+			// Vulnerability Stats
+			var vulnTotalCount int64
+			db.Model(&database.Vulnerability{}).Count(&vulnTotalCount)
+
+			type SevCount struct {
+				Severity string
+				Count    int64
+			}
+			var sevCounts []SevCount
+			db.Model(&database.Vulnerability{}).
+				Select("severity, count(*) as count").
+				Group("severity").
+				Scan(&sevCounts)
+
+			vulnStats = gin.H{
+				"Total":    vulnTotalCount,
+				"Critical": int64(0),
+				"High":     int64(0),
+				"Medium":   int64(0),
+				"Low":      int64(0),
+				"Info":     int64(0),
+			}
+			for _, sc := range sevCounts {
+				switch sc.Severity {
+				case "critical":
+					vulnStats["Critical"] = sc.Count
+				case "high":
+					vulnStats["High"] = sc.Count
+				case "medium":
+					vulnStats["Medium"] = sc.Count
+				case "low":
+					vulnStats["Low"] = sc.Count
+				case "info":
+					vulnStats["Info"] = sc.Count
+				}
+			}
+
+			// Cache the expensive data
+			dashCache.mu.Lock()
+			dashCache.data = gin.H{
+				"techCount":      techCount,
+				"techChart":      techChart,
+				"webServerStats": webServerStats,
+				"portStats":      portStats,
+				"serviceStats":   serviceStats,
+				"toolStats":      toolStats,
+				"assetStats":     assetStats,
+				"vulnStats":      vulnStats,
+			}
+			dashCache.cachedAt = time.Now()
+			dashCache.mu.Unlock()
 		}
+
+		// Tools Count (always fresh — very cheap)
+		toolsCount := len(modules.GetAll())
 
 		c.HTML(http.StatusOK, "dashboard.html", getGlobalContext(gin.H{
 			"Page": "dashboard",
@@ -750,18 +859,54 @@ func StartServer(port string) error {
 		c.JSON(http.StatusOK, cols)
 	})
 
+	// Screenshots gallery endpoint
+	r.GET("/api/screenshots", func(c *gin.Context) {
+		type ScreenshotEntry struct {
+			URL            string `json:"url"`
+			Title          string `json:"title"`
+			ScreenshotPath string `json:"screenshot_path"`
+			StatusCode     int    `json:"status_code"`
+			TargetValue    string `json:"target_value"`
+			TargetID       uint   `json:"target_id"`
+		}
+		var entries []ScreenshotEntry
+		database.GetDB().
+			Table("web_assets").
+			Select("web_assets.url, web_assets.title, web_assets.screenshot AS screenshot_path, web_assets.status_code, targets.value AS target_value, targets.id AS target_id").
+			Joins("LEFT JOIN targets ON targets.id = web_assets.target_id AND targets.deleted_at IS NULL").
+			Where("web_assets.screenshot != '' AND web_assets.screenshot IS NOT NULL AND web_assets.deleted_at IS NULL").
+			Order("web_assets.updated_at DESC").
+			Limit(500).
+			Scan(&entries)
+		c.JSON(http.StatusOK, entries)
+	})
+
 	// Assets
 	r.GET("/assets", func(c *gin.Context) {
-		// We already fetch assets in getGlobalContext, but the page specific logic
-		// might need it too. It's redundant but safe (gorm caches slightly or just lightweight sqlite).
-		// actually, we can just reuse the one from global context if we structured it differently,
-		// but standard pattern is clean separation.
+		// Load assets with only target counts for efficiency
+		type AssetWithCount struct {
+			database.Asset
+			TargetCount int64
+		}
 		var assets []database.Asset
-		database.GetDB().Preload("Targets").Find(&assets)
+		database.GetDB().Find(&assets)
+
+		// Get target counts per asset via SQL aggregation
+		type countResult struct {
+			AssetID uint
+			Count   int64
+		}
+		var counts []countResult
+		database.GetDB().Model(&database.Target{}).Select("asset_id, count(*) as count").Group("asset_id").Scan(&counts)
+		countMap := make(map[uint]int64)
+		for _, c := range counts {
+			countMap[c.AssetID] = c.Count
+		}
 
 		c.HTML(http.StatusOK, "assets.html", getGlobalContext(gin.H{
-			"Page":   "assets",
-			"Assets": assets,
+			"Page":       "assets",
+			"Assets":     assets,
+			"CountMap":   countMap,
 		}))
 	})
 
@@ -778,6 +923,7 @@ func StartServer(port string) error {
 				db.Create(&database.Asset{Name: name})
 			}
 		}
+		sbCache.invalidate()
 		c.Redirect(http.StatusFound, "/assets")
 	})
 
@@ -795,10 +941,17 @@ func StartServer(port string) error {
 			db.Unscoped().Where("target_id IN (?)", targetSubquery).Delete(&database.WebAsset{})
 			db.Unscoped().Where("target_id IN (?)", targetSubquery).Delete(&database.Vulnerability{})
 			db.Unscoped().Where("target_id IN (?)", targetSubquery).Delete(&database.CVE{})
-			// 2. Delete Targets
+			// 2. Cleanup on-disk log files for all targets in this asset
+			var targetIDs []uint
+			db.Model(&database.Target{}).Where("asset_id = ?", id).Pluck("id", &targetIDs)
+			for _, tid := range targetIDs {
+				core.CleanupTargetLogs(tid)
+			}
+			// 3. Delete Targets
 			db.Unscoped().Where("asset_id = ?", id).Delete(&database.Target{})
 			// 3. Delete Asset
 			db.Unscoped().Delete(&database.Asset{}, id)
+			sbCache.invalidate()
 		}
 		c.Redirect(http.StatusFound, "/assets")
 	})
@@ -1300,39 +1453,25 @@ func StartServer(port string) error {
 			os.Setenv(k, v)
 		}
 
-		// Restart Bot Logic
-		// Ideally we would stop the old one and start new, but for MVP we just try to start new one?
-		// Current simple implementation in main doesn't support clean restart easily without global var.
-		// For now, prompt user to restart app or we can try to hack it in.
-		// Let's implement a simple re-init trigger if we moved the client var to package level.
-
-		// Trigger re-init check (simple version: standard response)
-		// User might need to restart app for full effect if we don't implement dynamic reload.
-		// But let's try to utilize the existing init logic if possible.
-		// Actually, we should extract the Discord Init logic to a function we can call here.
-
 		if token != "" && mode == "custom" {
-			manager := core.GetManager()
-			// Close existing if we tracked it (we didn't yet track it globally)
-			// TODO: Add global tracking for discord client to allow Stop()
-
-			dc, err := discord.NewClient(token, channel, manager)
-			if err == nil {
-				// Stop previous if exists? (Not implemented yet)
-				go func() {
-					if err := dc.Start(); err != nil {
-						utils.LogError("Failed to restart Discord bot: %v", err)
-					}
-				}()
-
-				// Re-hook callbacks (thread-safe)
-				manager.SetOnStart(func(target string) {
-					dc.SendNotification("🚀 Scan Started", "Started scanning target: **"+target+"**", 0x34d399)
-				})
-				manager.SetOnStop(func(target string, cancelled bool) {
-					dc.SendNotification("🏁 Scan Ended", "Scanning finished or stopped for: **"+target+"**", 0x8b5cf6)
-				})
+			notifState.mu.Lock()
+			// Stop previous Discord session to prevent goroutine/websocket leak
+			if notifState.discordClient != nil {
+				notifState.discordClient.Stop()
+				notifState.discordClient = nil
 			}
+
+			dc, err := discord.NewClient(token, channel, core.GetManager())
+			if err == nil {
+				if startErr := dc.Start(); startErr != nil {
+					utils.LogError("Failed to restart Discord bot: %v", startErr)
+				} else {
+					notifState.discordClient = dc
+				}
+			}
+			// Rebuild callbacks so both Discord + Telegram are always included
+			rebuildCallbacks()
+			notifState.mu.Unlock()
 		}
 
 		c.Redirect(http.StatusFound, "/settings?tab=notifications")
@@ -1417,8 +1556,14 @@ func StartServer(port string) error {
 			db.Unscoped().Where("target_id = ?", id).Delete(&database.Vulnerability{})
 			db.Unscoped().Where("target_id = ?", id).Delete(&database.CVE{})
 
-			// 3. Delete Target
+			// 3. Cleanup on-disk log files for this target
+			if targetID := utils.StringToInt(id); targetID > 0 {
+				core.CleanupTargetLogs(uint(targetID))
+			}
+
+			// 4. Delete Target
 			db.Unscoped().Delete(&database.Target{}, id)
+			sbCache.invalidate()
 		}
 		ref := c.Request.Referer()
 		if ref != "" {
@@ -1428,21 +1573,11 @@ func StartServer(port string) error {
 		}
 	})
 
-	// Target Details
+	// Target Details — Lazy-loaded: only metadata + counts
 	r.GET("/target/:id", func(c *gin.Context) {
 		id := c.Param("id")
 		var target database.Target
-		// Preload everything for the details view
-		if err := database.GetDB().
-			Preload("Results").
-			Preload("Subdomains").
-			Preload("Ports", func(db *gorm.DB) *gorm.DB {
-				return db.Order("port ASC")
-			}).
-			Preload("WebAssets").
-			Preload("Vulns").
-			Preload("CVEs").
-			First(&target, "id = ?", id).Error; err != nil {
+		if err := database.GetDB().First(&target, "id = ?", id).Error; err != nil {
 			c.String(http.StatusInternalServerError, "Database error")
 			return
 		}
@@ -1451,55 +1586,111 @@ func StartServer(port string) error {
 			return
 		}
 
-		// Group CVEs by product for the template
-		cvesByProduct := make(map[string][]database.CVE)
-		for _, cve := range target.CVEs {
-			cvesByProduct[cve.Product] = append(cvesByProduct[cve.Product], cve)
-		}
-
-		// Sort CVEs within each product by severity
-		sevOrder := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-		for prod := range cvesByProduct {
-			cves := cvesByProduct[prod]
-			sort.Slice(cves, func(i, j int) bool {
-				oi, oj := sevOrder[cves[i].Severity], sevOrder[cves[j].Severity]
-				if oi != oj {
-					return oi < oj
-				}
-				return cves[i].CvssScore > cves[j].CvssScore
-			})
-			cvesByProduct[prod] = cves
-		}
-
-		// Count only Nuclei findings with severity low or above (not info)
-		vulnCount := 0
-		vulnsBySeverity := make(map[string][]database.Vulnerability)
-		for _, v := range target.Vulns {
-			sev := v.Severity
-			vulnsBySeverity[sev] = append(vulnsBySeverity[sev], v)
-			if sev == "low" || sev == "medium" || sev == "high" || sev == "critical" {
-				vulnCount++
-			}
-		}
-
-		// Sort vulns within each severity by name
-		for sev := range vulnsBySeverity {
-			vulns := vulnsBySeverity[sev]
-			sort.Slice(vulns, func(i, j int) bool {
-				return vulns[i].Name < vulns[j].Name
-			})
-			vulnsBySeverity[sev] = vulns
-		}
+		// Only fetch counts for the overview tab
+		db := database.GetDB()
+		var portsCount, webCount, subCount, vulnCount, cveCount int64
+		db.Model(&database.Port{}).Where("target_id = ?", target.ID).Count(&portsCount)
+		db.Model(&database.WebAsset{}).Where("target_id = ?", target.ID).Count(&webCount)
+		db.Model(&database.Target{}).Where("parent_id = ?", target.ID).Count(&subCount)
+		db.Model(&database.Vulnerability{}).Where("target_id = ? AND severity IN ('low','medium','high','critical')", target.ID).Count(&vulnCount)
+		db.Model(&database.CVE{}).Where("target_id = ?", target.ID).Count(&cveCount)
 
 		c.HTML(http.StatusOK, "target_details.html", getGlobalContext(gin.H{
-			"Page":            "assets",
-			"Target":          target,
-			"CVEsByProduct":   cvesByProduct,
-			"VulnCount":       vulnCount,
-			"VulnsBySeverity": vulnsBySeverity,
-			"SeverityOrder":   []string{"critical", "high", "medium", "low", "info"},
+			"Page":       "assets",
+			"Target":     target,
+			"PortsCount": portsCount,
+			"WebCount":   webCount,
+			"SubCount":   subCount,
+			"VulnCount":  vulnCount,
+			"CVECount":   cveCount,
 		}))
+	})
 
+	// --- Target Detail API Endpoints (Lazy-loaded tabs) ---
+	r.GET("/api/target/:id/ports", func(c *gin.Context) {
+		id := c.Param("id")
+		var ports []database.Port
+		database.GetDB().Where("target_id = ?", id).Order("port ASC").Find(&ports)
+		c.JSON(http.StatusOK, ports)
+	})
+
+	r.GET("/api/target/:id/web", func(c *gin.Context) {
+		id := c.Param("id")
+		var webAssets []database.WebAsset
+		database.GetDB().Where("target_id = ?", id).Find(&webAssets)
+		c.JSON(http.StatusOK, webAssets)
+	})
+
+	r.GET("/api/target/:id/subdomains", func(c *gin.Context) {
+		id := c.Param("id")
+		var subs []database.Target
+		database.GetDB().Where("parent_id = ?", id).Find(&subs)
+		c.JSON(http.StatusOK, subs)
+	})
+
+	r.GET("/api/target/:id/vulns", func(c *gin.Context) {
+		id := c.Param("id")
+		var vulns []database.Vulnerability
+		database.GetDB().Where("target_id = ?", id).Find(&vulns)
+		var cves []database.CVE
+		database.GetDB().Where("target_id = ?", id).Find(&cves)
+		c.JSON(http.StatusOK, gin.H{"vulns": vulns, "cves": cves})
+	})
+
+	r.GET("/api/target/:id/logs", func(c *gin.Context) {
+		id := c.Param("id")
+		var results []database.ScanResult
+		// Limit to 50 most recent to avoid reading hundreds of files into memory
+		database.GetDB().Where("target_id = ?", id).Order("created_at desc").Limit(50).Find(&results)
+
+		// For file-based logs, read content from disk
+		type LogEntry struct {
+			ToolName  string    `json:"tool_name"`
+			Output    string    `json:"output"`
+			CreatedAt time.Time `json:"created_at"`
+		}
+		var logs []LogEntry
+		for _, r := range results {
+			output := r.Output
+			if strings.HasPrefix(output, "file://") {
+				filePath := strings.TrimPrefix(output, "file://")
+				filePath = filepath.Clean(filePath)
+				// Security: ensure path is within data/logs/
+				if strings.HasPrefix(filePath, filepath.Join("data", "logs")) {
+					data, err := os.ReadFile(filePath)
+					if err == nil {
+						output = string(data)
+					} else {
+						output = "[Error reading log file: " + err.Error() + "]"
+					}
+				} else {
+					output = "[Invalid log file path]"
+				}
+			}
+			// Truncate very large outputs for the API response
+			if len(output) > 256*1024 {
+				output = output[:256*1024] + "\n... [truncated]"
+			}
+			logs = append(logs, LogEntry{
+				ToolName:  r.ToolName,
+				Output:    output,
+				CreatedAt: r.CreatedAt,
+			})
+		}
+		c.JSON(http.StatusOK, logs)
+	})
+
+	// Nuclei templates by folder (for lazy-loading advanced scan tabs)
+	r.GET("/api/nuclei/templates/folder/:name", func(c *gin.Context) {
+		folder := c.Param("name")
+		var templates []database.NucleiTemplate
+		db := database.GetDB()
+		// Match templates whose file_path starts with the folder name
+		db.Where("file_path LIKE ?", folder+string(os.PathSeparator)+"%").Order("template_id ASC").Find(&templates)
+		c.JSON(http.StatusOK, gin.H{
+			"count":     len(templates),
+			"templates": templates,
+		})
 	})
 
 	// Scan Trigger

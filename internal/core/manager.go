@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -252,38 +253,64 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		return
 	}
 
-	// === STAGE 2: Filter and Save newly found subdomains ===
+	// === STAGE 2: Filter and Save newly found subdomains (Parallel DNS) ===
 	utils.LogInfo("[Scanner] Stage 2: Filtering and saving %d newly discovered subdomains", len(subdomains))
 
-	// First, check all newly-found subdomains and only save valid ones
+	// Parallel DNS resolution for new subdomains
+	const dnsWorkers = 20
+	type subdomainResult struct {
+		domain string
+		check  TargetCheckResult
+	}
+	subResultChan := make(chan subdomainResult, len(subdomains))
+	dnsSem := make(chan struct{}, dnsWorkers)
+	var dnsWG sync.WaitGroup
+
 	for _, domain := range subdomains {
 		if ctx.Err() != nil {
 			break
 		}
+		dnsWG.Add(1)
+		dnsSem <- struct{}{}
+		go func(d string) {
+			defer dnsWG.Done()
+			defer func() { <-dnsSem }()
+			check := ResolveAndCheck(d)
+			subResultChan <- subdomainResult{domain: d, check: check}
+		}(domain)
+	}
 
-		check := ResolveAndCheck(domain)
+	go func() {
+		dnsWG.Wait()
+		close(subResultChan)
+	}()
+
+	for sr := range subResultChan {
+		if ctx.Err() != nil {
+			break
+		}
 
 		subTarget := database.Target{
 			AssetID:      asset.ID,
 			ParentID:     &targetObj.ID,
-			Value:        domain,
+			Value:        sr.domain,
 			Type:         "domain",
-			IsAlive:      check.IsAlive,
-			IsCloudflare: check.IsCloudflare,
-			IsLocalhost:  check.IsLocalhost,
+			IsAlive:      sr.check.IsAlive,
+			IsCloudflare: sr.check.IsCloudflare,
+			IsLocalhost:  sr.check.IsLocalhost,
 			Status:       "up",
 		}
 
-		if !check.IsAlive {
-			utils.LogDebug("[Scanner] Subdomain %s is unreachable, saving as dead", domain)
+		if !sr.check.IsAlive {
+			utils.LogDebug("[Scanner] Subdomain %s is unreachable, saving as dead", sr.domain)
 			subTarget.IsAlive = false
 			subTarget.Status = "unreachable"
-		} else if check.IsLocalhost && profile.ExcludeLocalhost {
-			utils.LogDebug("[Scanner] Subdomain %s resolves to localhost (excluded), saving as dead", domain)
+		} else if sr.check.IsLocalhost && profile.ExcludeLocalhost {
+			utils.LogDebug("[Scanner] Subdomain %s resolves to localhost (excluded), saving as dead", sr.domain)
 			subTarget.IsAlive = false
 			subTarget.Status = "resolves to localhost"
-		} else if check.IsCloudflare && profile.ExcludeCloudflare {
-			utils.LogDebug("[Scanner] Subdomain %s is behind Cloudflare (excluded), saving as dead", domain)
+		} else if sr.check.IsCloudflare && profile.ExcludeCloudflare {
+			utils.LogDebug("[Scanner] Subdomain %s is behind Cloudflare (excluded), saving as dead", sr.domain)
 			subTarget.IsAlive = false
 			subTarget.Status = "Cloudflare"
 		}
@@ -291,8 +318,8 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		if err := db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "value"}},
 			DoUpdates: clause.AssignmentColumns([]string{"is_alive", "is_cloudflare", "is_localhost", "status", "updated_at"}),
-		}).Where(database.Target{Value: domain, AssetID: asset.ID}).FirstOrCreate(&subTarget).Error; err != nil {
-			utils.LogDebug("[Scanner] Error creating subtarget %s: %v", domain, err)
+		}).Where(database.Target{Value: sr.domain, AssetID: asset.ID}).FirstOrCreate(&subTarget).Error; err != nil {
+			utils.LogDebug("[Scanner] Error creating subtarget %s: %v", sr.domain, err)
 			continue
 		}
 
@@ -353,53 +380,75 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 		}()
 	}
 
-	// Re-verify all subdomains we are about to scan
+	// Re-verify all subdomains in parallel
+	subVerifyChan := make(chan database.Target, len(allSubTargets))
+	var subVerifyWG sync.WaitGroup
+	subVerifySem := make(chan struct{}, dnsWorkers)
+
 	for _, subTarget := range allSubTargets {
 		if ctx.Err() != nil {
 			break
 		}
+		subVerifyWG.Add(1)
+		subVerifySem <- struct{}{}
+		go func(st database.Target) {
+			defer subVerifyWG.Done()
+			defer func() { <-subVerifySem }()
 
-		check := ResolveAndCheck(subTarget.Value)
+			check := ResolveAndCheck(st.Value)
 
-		if !check.IsAlive {
-			utils.LogDebug("[Scanner] Subdomain %s is unreachable (%s), soft-deleting", subTarget.Value, check.Status)
-			db.Model(&subTarget).Updates(map[string]interface{}{"status": check.Status, "is_alive": false})
-			db.Delete(&subTarget)
-			continue
-		}
+			if !check.IsAlive {
+				utils.LogDebug("[Scanner] Subdomain %s is unreachable (%s), soft-deleting", st.Value, check.Status)
+				db.Model(&st).Updates(map[string]interface{}{"status": check.Status, "is_alive": false})
+				db.Delete(&st)
+				return
+			}
 
-		if check.IsLocalhost && profile.ExcludeLocalhost {
-			utils.LogDebug("[Scanner] Subdomain %s resolves to localhost (excluded), soft-deleting", subTarget.Value)
-			db.Model(&subTarget).Updates(map[string]interface{}{"status": "resolves to localhost", "is_alive": false})
-			db.Delete(&subTarget)
-			continue
-		}
+			if check.IsLocalhost && profile.ExcludeLocalhost {
+				utils.LogDebug("[Scanner] Subdomain %s resolves to localhost (excluded), soft-deleting", st.Value)
+				db.Model(&st).Updates(map[string]interface{}{"status": "resolves to localhost", "is_alive": false})
+				db.Delete(&st)
+				return
+			}
 
-		if profile.ExcludeCloudflare && check.IsCloudflare {
-			utils.LogDebug("[Scanner] Subdomain %s is behind Cloudflare (excluded), soft-deleting", subTarget.Value)
-			db.Model(&subTarget).Updates(map[string]interface{}{"status": "Cloudflare", "is_alive": false})
-			db.Delete(&subTarget)
-			continue
-		}
+			if profile.ExcludeCloudflare && check.IsCloudflare {
+				utils.LogDebug("[Scanner] Subdomain %s is behind Cloudflare (excluded), soft-deleting", st.Value)
+				db.Model(&st).Updates(map[string]interface{}{"status": "Cloudflare", "is_alive": false})
+				db.Delete(&st)
+				return
+			}
 
-		db.Model(&subTarget).Updates(map[string]interface{}{
-			"is_cloudflare": check.IsCloudflare,
-			"is_localhost":  check.IsLocalhost,
-			"is_alive":      true,
-			"status":        "up",
-		})
+			db.Model(&st).Updates(map[string]interface{}{
+				"is_cloudflare": check.IsCloudflare,
+				"is_localhost":  check.IsLocalhost,
+				"is_alive":      true,
+				"status":        "up",
+			})
 
-		subTarget.IsAlive = true
-		subTarget.IsCloudflare = check.IsCloudflare
-		subTarget.IsLocalhost = check.IsLocalhost
-		subTarget.Status = "up"
+			st.IsAlive = true
+			st.IsCloudflare = check.IsCloudflare
+			st.IsLocalhost = check.IsLocalhost
+			st.Status = "up"
 
-		producerWG.Add(1)
-		go func(t database.Target) {
-			defer producerWG.Done()
-			targetsChan <- t
+			subVerifyChan <- st
 		}(subTarget)
 	}
+
+	go func() {
+		subVerifyWG.Wait()
+		close(subVerifyChan)
+	}()
+
+	// Feed verified subdomains into the scan channel.
+	// Register the feeder goroutine with producerWG BEFORE starting the closer,
+	// so Wait() cannot return early before subdomain results arrive.
+	producerWG.Add(1)
+	go func() {
+		defer producerWG.Done()
+		for st := range subVerifyChan {
+			targetsChan <- st
+		}
+	}()
 
 	// Channel Closer
 	go func() {
@@ -440,9 +489,10 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 
 					if err == nil && output != "" {
 						lines := strings.Split(output, "\n")
-						portsFound := 0
-						var targetPorts []int
+						var portBatch []database.Port
 						seenNaabuPorts := make(map[int]bool)
+						var targetPorts []int
+
 						for _, line := range lines {
 							if strings.TrimSpace(line) == "" {
 								continue
@@ -459,27 +509,27 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 								utils.LogDebug("[Scanner] [Naabu] Invalid port value: %d", nResult.Port)
 								continue
 							}
-							// Skip duplicate ports
 							if seenNaabuPorts[nResult.Port] {
 								continue
 							}
 							seenNaabuPorts[nResult.Port] = true
 
-							// Use OnConflict to handle race condition cleanly
-							db.Clauses(clause.OnConflict{
-								Columns:   []clause.Column{{Name: "target_id"}, {Name: "port"}},
-								DoNothing: true,
-							}).Create(&database.Port{
+							portBatch = append(portBatch, database.Port{
 								TargetID: t.ID,
 								Port:     nResult.Port,
 								Protocol: "tcp",
 								Service:  "unknown",
 							})
-							portsFound++
 							targetPorts = append(targetPorts, nResult.Port)
 						}
-						if portsFound > 0 {
-							utils.LogSuccess("[Scanner] [Naabu] Found %d open ports on %s", portsFound, t.Value)
+
+						// Batch insert ports
+						if len(portBatch) > 0 {
+							db.Clauses(clause.OnConflict{
+								Columns:   []clause.Column{{Name: "target_id"}, {Name: "port"}},
+								DoNothing: true,
+							}).CreateInBatches(&portBatch, 100)
+							utils.LogSuccess("[Scanner] [Naabu] Found %d open ports on %s", len(portBatch), t.Value)
 						}
 
 						// --- STAGE 3: Nmap Service Enumeration ---
@@ -499,6 +549,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 									utils.LogError("[Scanner] Nmap failed for %s: %v", t.Value, nmapErr)
 								} else {
 									utils.LogSuccess("[Scanner] [Nmap] Enriched %d services on %s", len(nResults), t.Value)
+									// Batch update nmap results
 									for _, res := range nResults {
 										db.Model(&database.Port{}).
 											Where("target_id = ? AND port = ?", t.ID, res.Port).
@@ -568,27 +619,34 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 									utils.LogInfo("[Scanner] Triggering Httpx Stage 4 for %d URLs on %s", len(httpUrls), t.Value)
 									httpxMod := modules.Get("httpx")
 									if hx, ok := httpxMod.(*modules.Httpx); ok && hx.CheckInstalled() {
-										webResults, httpxErr := hx.RunRich(ctx, httpUrls)
-										if httpxErr != nil {
-											utils.LogError("[Scanner] Httpx Stage 4 failed: %v", httpxErr)
-										} else {
-											// Save WebAssets
-											count := 0
-											for _, w := range webResults {
-												if w.URL == "" {
-													continue
-												}
+										// Stream httpx results to avoid buffering all response bodies
+										httpxChan := make(chan modules.HttpxResult, 50)
+										go func() {
+											if err := hx.RunRichStream(ctx, httpUrls, httpxChan); err != nil {
+												utils.LogError("[Scanner] Httpx Stage 4 failed: %v", err)
+											}
+										}()
 
+										// Collect results for downstream processing
+										var webResults []modules.HttpxResult
+										for w := range httpxChan {
+											if w.URL == "" {
+												continue
+											}
+											webResults = append(webResults, w)
+										}
+
+										// Save WebAssets in batch
+										if len(webResults) > 0 {
+											var webBatch []database.WebAsset
+											for _, w := range webResults {
 												// Run Wappalyzer analysis with response headers
 												wapp := modules.Get("wappalyzer")
 												if wappalyzer, ok := wapp.(*modules.Wappalyzer); ok && profile.EnableWebWappalyzer {
-													// Parse response headers from httpx response
 													headers := extractHeadersFromResponse(w.Response)
 													bodyBytes := []byte(w.Response)
-
 													extraTech := wappalyzer.Analyze(headers, bodyBytes)
 
-													// Merge unique technologies
 													existing := make(map[string]bool)
 													for _, tech := range w.Tech {
 														existing[tech] = true
@@ -607,15 +665,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 												}
 
 												techStr := strings.Join(w.Tech, ", ")
-
-												db.Clauses(clause.OnConflict{
-													Columns: []clause.Column{{Name: "target_id"}, {Name: "url"}},
-													DoUpdates: clause.AssignmentColumns([]string{
-														"title", "tech_stack", "web_server", "status_code",
-														"content_len", "word_count", "line_count", "content_type",
-														"location", "ip", "cname", "cdn", "response", "updated_at",
-													}),
-												}).Create(&database.WebAsset{
+												webBatch = append(webBatch, database.WebAsset{
 													TargetID:    t.ID,
 													URL:         w.URL,
 													Title:       w.Title,
@@ -632,10 +682,19 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 													CDN:         w.CDNName,
 													Response:    "",
 												})
-												count++
 											}
 
-											utils.LogSuccess("[Scanner] [Httpx] Enriched %d web assets on %s", count, t.Value)
+											// Batch upsert web assets
+											db.Clauses(clause.OnConflict{
+												Columns: []clause.Column{{Name: "target_id"}, {Name: "url"}},
+												DoUpdates: clause.AssignmentColumns([]string{
+													"title", "tech_stack", "web_server", "status_code",
+													"content_len", "word_count", "line_count", "content_type",
+													"location", "ip", "cname", "cdn", "response", "updated_at",
+												}),
+											}).CreateInBatches(&webBatch, 100)
+
+											utils.LogSuccess("[Scanner] [Httpx] Enriched %d web assets on %s", len(webBatch), t.Value)
 
 											// --- STAGES 5-6: Parallel Web Asset Processing ---
 											gw := modules.Get("gowitness")
@@ -651,10 +710,8 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 											urlInstalled := urlOk && urlMod.CheckInstalled() && profile.EnableWebUrlfinder
 
 											if gwInstalled || katInstalled || urlInstalled {
-												utils.LogInfo("[Scanner] Triggering parallel web asset processing for %d URLs on %s", count, t.Value)
+												utils.LogInfo("[Scanner] Triggering parallel web asset processing for %d URLs on %s", len(webResults), t.Value)
 
-												// Bounded worker pool: only spawn a fixed number of goroutines
-												// instead of one goroutine per URL (which causes thrashing at scale)
 												const webWorkers = 10
 												webJobsChan := make(chan modules.HttpxResult, webWorkers)
 												var webWG sync.WaitGroup
@@ -716,7 +773,6 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 															}
 
 															if katInstalled {
-																// Run Katana
 																args := []string{"-jc", "-kf", "all", "-fx", "-d", "5", "-pc", "-c", "20"}
 																katanaOutput, katErr := katanaMod.RunCustom(ctx, webResult.URL, args)
 																recordResult(db, t.ID, "katana", katanaOutput)
@@ -726,7 +782,6 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 															}
 
 															if urlInstalled {
-																// Run URLFinder
 																u, parseErr := url.Parse(webResult.URL)
 																if parseErr == nil && u.Host != "" {
 																	urlHostname := u.Hostname()
@@ -750,7 +805,7 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 																	} else {
 																		db.Model(&database.WebAsset{}).
 																			Where("target_id = ? AND url = ?", t.ID, webResult.URL).
-																			Update("katana_output", string(jsonBytes)) // stored in katana_output field for legacy reasons
+																			Update("katana_output", string(jsonBytes))
 																	}
 																}
 															}
@@ -766,7 +821,6 @@ func (sm *ScanManager) runScanLogic(ctx context.Context, targetInput string, ass
 													webJobsChan <- w
 												}
 												close(webJobsChan)
-												webWG.Wait()
 												webWG.Wait()
 											}
 										}
@@ -909,7 +963,7 @@ func (sm *ScanManager) runCvemapScan(ctx context.Context, db *gorm.DB, targetObj
 		}
 
 		seen := make(map[string]bool)
-		count := 0
+		var cveBatch []database.CVE
 
 		for _, result := range response.Results {
 			if result.CveID == "" || seen[result.CveID] {
@@ -917,12 +971,7 @@ func (sm *ScanManager) runCvemapScan(ctx context.Context, db *gorm.DB, targetObj
 			}
 			seen[result.CveID] = true
 
-			db.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "target_id"}, {Name: "product"}, {Name: "cve_id"}},
-				DoUpdates: clause.AssignmentColumns([]string{
-					"severity", "cvss_score", "epss_score", "is_kev", "has_poc", "has_template",
-				}),
-			}).Create(&database.CVE{
+			cveBatch = append(cveBatch, database.CVE{
 				TargetID:    targetObj.ID,
 				Product:     product,
 				CveID:       result.CveID,
@@ -933,12 +982,18 @@ func (sm *ScanManager) runCvemapScan(ctx context.Context, db *gorm.DB, targetObj
 				HasPOC:      result.HasPOC,
 				HasTemplate: result.HasTemplate,
 			})
-			count++
 		}
 
-		if count > 0 {
-			utils.LogSuccess("[Scanner] [Cvemap] Found %d CVEs for %s", count, product)
-			totalCVEs += count
+		// Batch upsert CVEs
+		if len(cveBatch) > 0 {
+			db.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "target_id"}, {Name: "product"}, {Name: "cve_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{
+					"severity", "cvss_score", "epss_score", "is_kev", "has_poc", "has_template",
+				}),
+			}).CreateInBatches(&cveBatch, 100)
+			utils.LogSuccess("[Scanner] [Cvemap] Found %d CVEs for %s", len(cveBatch), product)
+			totalCVEs += len(cveBatch)
 		}
 	}
 
@@ -1101,14 +1156,11 @@ func (sm *ScanManager) runNucleiScan(ctx context.Context, db *gorm.DB, targetObj
 		if err != nil {
 			utils.LogDebug("[Scanner] [Nuclei] Network scan error for %s: %v", scan.Target, err)
 
-			// Safely catch instances where the template isn't valid or nuclei inherently rejected the scan 
-			// and aggressively pivot to the Wappalyzer Automatic Scan (-as).
 			if strings.Contains(output, "no templates provided for scan") || strings.Contains(output, "invalid value") || strings.Contains(err.Error(), "exit status") {
 				utils.LogInfo("[Scanner] [Nuclei] Scan for tags %v failed on %s, aggressively falling back to auto-scan", scan.Tags, scan.Target)
 				plan.FallbackURLs = append(plan.FallbackURLs, scan.Target)
 			}
 		} else if strings.Contains(output, "no templates provided for scan") {
-			// Catch empty/warning outputs even if the exit code was 0
 			utils.LogInfo("[Scanner] [Nuclei] No templates mapped to tags %v on %s, falling back to auto-scan", scan.Tags, scan.Target)
 			plan.FallbackURLs = append(plan.FallbackURLs, scan.Target)
 		}
@@ -1178,7 +1230,6 @@ func (sm *ScanManager) runNucleiScan(ctx context.Context, db *gorm.DB, targetObj
 		}
 	}
 
-
 	if totalFindings > 0 {
 		utils.LogSuccess("[Scanner] [Nuclei] Found %d vulnerabilities for %s", totalFindings, targetObj.Value)
 	}
@@ -1190,8 +1241,8 @@ func (sm *ScanManager) parseAndStoreNucleiResults(db *gorm.DB, targetID uint, ou
 		return 0
 	}
 
-	count := 0
 	seen := make(map[string]bool) // Deduplicate by template-id + matched-at
+	var vulnBatch []database.Vulnerability
 
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
@@ -1221,12 +1272,7 @@ func (sm *ScanManager) parseAndStoreNucleiResults(db *gorm.DB, targetID uint, ou
 			extracted = strings.Join(result.ExtractedResults, "\n")
 		}
 
-		db.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "target_id"}, {Name: "template_id"}, {Name: "matcher_name"}},
-			DoUpdates: clause.AssignmentColumns([]string{
-				"name", "severity", "description", "extracted",
-			}),
-		}).Create(&database.Vulnerability{
+		vulnBatch = append(vulnBatch, database.Vulnerability{
 			TargetID:    targetID,
 			Name:        result.Info.Name,
 			Severity:    strings.ToLower(result.Info.Severity),
@@ -1235,34 +1281,59 @@ func (sm *ScanManager) parseAndStoreNucleiResults(db *gorm.DB, targetID uint, ou
 			Extracted:   extracted,
 			TemplateID:  result.TemplateID,
 		})
-		count++
 	}
 
-	return count
+	// Batch upsert vulnerabilities
+	if len(vulnBatch) > 0 {
+		db.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "target_id"}, {Name: "template_id"}, {Name: "matcher_name"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"name", "severity", "description", "extracted",
+			}),
+		}).CreateInBatches(&vulnBatch, 100)
+	}
+
+	return len(vulnBatch)
 }
 
-// recordResult saves raw tool output to the database with retry on failure
-
+// recordResult saves raw tool output to a flat file on disk and records the file path in the database.
+// This prevents massive TEXT blobs from bloating the SQLite database.
 func recordResult(db *gorm.DB, targetID uint, tool, output string) {
 	if output == "" {
 		return
 	}
-	result := db.Create(&database.ScanResult{
-		TargetID: targetID,
-		ToolName: tool,
-		Output:   output,
-	})
-	if result.Error != nil {
-		utils.LogError("[Scanner] Failed to record %s result for target %d: %v", tool, targetID, result.Error)
-		// Retry once after a brief pause (handles transient SQLite locks)
-		time.Sleep(500 * time.Millisecond)
-		retryResult := db.Create(&database.ScanResult{
+
+	// Write output to flat file
+	logsDir := filepath.Join("data", "logs", fmt.Sprintf("%d", targetID))
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		utils.LogError("[Scanner] Failed to create logs dir %s: %v", logsDir, err)
+		return
+	}
+
+	filename := fmt.Sprintf("%s-%d.log", tool, time.Now().UnixNano())
+	filePath := filepath.Join(logsDir, filename)
+
+	if err := os.WriteFile(filePath, []byte(output), 0644); err != nil {
+		utils.LogError("[Scanner] Failed to write log file %s: %v", filePath, err)
+		return
+	}
+
+	// Store file reference in DB (prefix with file:// so the UI knows to read from disk)
+	ref := "file://" + filePath
+
+	db.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&database.ScanResult{
 			TargetID: targetID,
 			ToolName: tool,
-			Output:   output,
-		})
-		if retryResult.Error != nil {
-			utils.LogError("[Scanner] Retry failed for %s result: %v", tool, retryResult.Error)
-		}
+			Output:   ref,
+		}).Error
+	})
+}
+
+// CleanupTargetLogs removes on-disk log files for a target when it is deleted.
+func CleanupTargetLogs(targetID uint) {
+	logsDir := filepath.Join("data", "logs", fmt.Sprintf("%d", targetID))
+	if err := os.RemoveAll(logsDir); err != nil && !os.IsNotExist(err) {
+		utils.LogDebug("[Cleanup] Failed to remove logs for target %d: %v", targetID, err)
 	}
 }

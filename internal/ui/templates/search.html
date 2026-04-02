@@ -12,10 +12,9 @@
         <div class="saved-queries-list" id="savedQueriesList">
             {{if .SavedSearches}}
             {{range .SavedSearches}}
-            <div class="saved-query-item">
-                <span class="sq-name" data-query="{{.QueryData}}" data-id="{{.ID}}"
-                    onclick="loadQuery(this)">{{.Name}}</span>
-                <button class="btn btn-danger btn-sm" data-id="{{.ID}}" onclick="deleteQuery(this)">X</button>
+            <div class="saved-query-item" onclick="loadQuery(this.querySelector('.sq-name'))" style="cursor:pointer;">
+                <span class="sq-name" data-query="{{.QueryData}}" data-id="{{.ID}}">{{.Name}}</span>
+                <button class="btn btn-danger btn-sm" data-id="{{.ID}}" onclick="event.stopPropagation(); deleteQuery(this)">X</button>
             </div>
             {{end}}
             {{else}}
@@ -84,6 +83,20 @@
             <tbody id="resultsBody"></tbody>
         </table>
     </div>
+</div>
+
+<!-- Screenshot Gallery -->
+<div class="screenshots-container card" id="screenshotsContainer" style="display: none; margin-bottom: 25px;">
+    <div class="results-header">
+        <h3>Screenshots <span id="screenshotsCount" class="badge badge-cf">0</span></h3>
+    </div>
+    <div class="screenshots-grid" id="screenshotsGrid"></div>
+</div>
+
+<!-- Lightbox for screenshots -->
+<div id="screenshotLightbox" onclick="closeLightbox(event)" style="display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.92); align-items:center; justify-content:center; flex-direction:column; cursor:pointer;">
+    <img id="lightboxImg" style="max-width:90%; max-height:80vh; border-radius:8px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+    <div id="lightboxInfo" style="margin-top:15px; text-align:center; color:#e5e7eb; font-family:monospace; font-size:0.9rem;"></div>
 </div>
 
 <div class="helper-text-container card">
@@ -222,6 +235,85 @@
     #resultsTable th { text-transform: capitalize; white-space: nowrap; }
     #resultsTable td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #resultsTable td:hover { white-space: normal; word-break: break-all; }
+
+    /* Screenshot Gallery */
+    .screenshots-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+        margin-top: 15px;
+    }
+
+    .screenshot-card {
+        background: var(--bg-body);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+        transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+        cursor: pointer;
+    }
+
+    .screenshot-card:hover {
+        border-color: var(--color-primary);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+    }
+
+    .screenshot-card img {
+        width: 100%;
+        height: 180px;
+        object-fit: cover;
+        display: block;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .screenshot-card-info {
+        padding: 10px 12px;
+    }
+
+    .screenshot-card-info .sc-url {
+        font-size: 0.82rem;
+        color: var(--color-text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+        margin-bottom: 4px;
+        font-family: monospace;
+    }
+
+    .screenshot-card-info .sc-title {
+        font-size: 0.78rem;
+        color: var(--color-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+        margin-bottom: 6px;
+    }
+
+    .screenshot-card-info .sc-target-link {
+        font-size: 0.78rem;
+        color: var(--color-primary);
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: color 0.15s;
+    }
+
+    .screenshot-card-info .sc-target-link:hover {
+        color: #818cf8;
+        text-decoration: underline;
+    }
+
+    .screenshot-card-info .sc-status {
+        float: right;
+        font-size: 0.75rem;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: var(--bg-hover);
+    }
 </style>
 
 <script>
@@ -538,6 +630,12 @@
         try {
             const payload = JSON.parse(el.getAttribute('data-query'));
 
+            // Special: Screenshotness gallery mode
+            if (payload.source === '__screenshots__') {
+                executeScreenshots();
+                return;
+            }
+
             // Restore source
             if (payload.source) {
                 currentSource = payload.source;
@@ -572,6 +670,96 @@
             alert('Failed to load saved query: ' + e.message);
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Screenshotness Gallery
+    // -----------------------------------------------------------------------
+    async function executeScreenshots() {
+        const resultsContainer = document.getElementById('resultsContainer');
+        const screenshotsContainer = document.getElementById('screenshotsContainer');
+        const grid = document.getElementById('screenshotsGrid');
+        const countSpan = document.getElementById('screenshotsCount');
+
+        // Hide table results, show gallery
+        resultsContainer.style.display = 'none';
+        screenshotsContainer.style.display = 'block';
+        grid.innerHTML = '<p style="text-align:center; color: var(--color-muted); padding: 20px;">Loading screenshots...</p>';
+
+        try {
+            const res = await fetch('/api/screenshots');
+            if (!res.ok) throw new Error('Failed to fetch screenshots');
+            const data = await res.json();
+            countSpan.textContent = data.length || 0;
+
+            if (!data || data.length === 0) {
+                grid.innerHTML = '<p style="text-align:center; color: var(--color-muted); padding: 40px;">No screenshots captured yet.</p>';
+                return;
+            }
+
+            grid.innerHTML = '';
+            data.forEach(entry => {
+                const card = document.createElement('div');
+                card.className = 'screenshot-card';
+
+                const img = document.createElement('img');
+                img.src = '/' + entry.screenshot_path;
+                img.alt = entry.title || entry.url;
+                img.loading = 'lazy';
+                img.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openLightbox('/' + entry.screenshot_path, entry.url, entry.title);
+                });
+                card.appendChild(img);
+
+                const info = document.createElement('div');
+                info.className = 'screenshot-card-info';
+
+                const statusClass = entry.status_code === 200 ? 'color: var(--color-secondary);' : '';
+                info.innerHTML =
+                    '<span class="sc-url" title="' + esc(entry.url) + '">' + esc(entry.url) + '</span>' +
+                    '<span class="sc-title">' + esc(entry.title || 'No Title') + '</span>' +
+                    '<div style="display: flex; justify-content: space-between; align-items: center;">' +
+                        '<a href="/target/' + entry.target_id + '" class="sc-target-link" onclick="event.stopPropagation()">→ ' + esc(entry.target_value) + '</a>' +
+                        '<span class="sc-status" style="' + statusClass + '">' + entry.status_code + '</span>' +
+                    '</div>';
+                card.appendChild(info);
+                grid.appendChild(card);
+            });
+        } catch (e) {
+            grid.innerHTML = '<p style="text-align:center; color:red; padding: 20px;">Error: ' + e.message + '</p>';
+        }
+    }
+
+    function esc(str) {
+        if (!str) return '';
+        const el = document.createElement('span');
+        el.textContent = str;
+        return el.innerHTML;
+    }
+
+    function openLightbox(src, url, title) {
+        const lb = document.getElementById('screenshotLightbox');
+        document.getElementById('lightboxImg').src = src;
+        document.getElementById('lightboxInfo').innerHTML =
+            '<div style="margin-bottom:4px;">' + esc(url) + '</div>' +
+            '<div style="color:#9ca3af; font-size:0.8rem;">' + esc(title || '') + '</div>';
+        lb.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeLightbox(e) {
+        if (e.target.tagName === 'IMG') return; // Don't close when clicking the image itself
+        document.getElementById('screenshotLightbox').style.display = 'none';
+        document.body.style.overflow = '';
+    }
+
+    // Close lightbox on Escape
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            document.getElementById('screenshotLightbox').style.display = 'none';
+            document.body.style.overflow = '';
+        }
+    });
 
     async function deleteQuery(el) {
         if (!confirm('Delete this saved query?')) return;

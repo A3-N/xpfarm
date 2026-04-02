@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -113,8 +114,21 @@ func (n *Nmap) CustomScan(ctx context.Context, target string, ports []int, mode 
 	}
 
 	cmd := exec.CommandContext(ctx, path, args...)
-	outputBytes, err := cmd.CombinedOutput() // This captures normal output now
+	// Cap captured output at 10MB to prevent memory spikes from verbose scripts
+	stdout, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		return nil, "", fmt.Errorf("nmap pipe failed: %v", pipeErr)
+	}
+	cmd.Stderr = cmd.Stdout
+
+	if startErr := cmd.Start(); startErr != nil {
+		return nil, "", fmt.Errorf("nmap scan failed to start: %v", startErr)
+	}
+
+	const maxNmapOutput = 10 * 1024 * 1024 // 10MB
+	outputBytes, _ := io.ReadAll(io.LimitReader(stdout, maxNmapOutput))
 	rawOutput := string(outputBytes)
+	err = cmd.Wait()
 
 	if err != nil {
 		return nil, rawOutput, fmt.Errorf("nmap scan failed: %v", err)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"reflect"
 	"strings"
 	"time"
 
@@ -39,12 +40,32 @@ func prefix(c func(a ...interface{}) string) string {
 // --- Progress Manager Removed ---
 // Logic removed as per user request. Use standard logging only.
 
-func printLog(prefixFunc func(a ...interface{}) string, format string, a ...interface{}) {
+// gradientPrefixCache stores pre-computed gradient prefixes to avoid
+// per-character fmt.Sprintf on every log line (hundreds/sec during scans).
+var gradientPrefixCache = map[uintptr]string{}
 
+func init() {
+	// Pre-compute gradient prefixes for all known prefix functions.
+	// Uses function pointer as map key for O(1) lookup.
+	for _, fn := range []func(a ...interface{}) string{Gradient, GradientSuccess, GradientError, GradientWarning, GradientDebug} {
+		gradientPrefixCache[getFuncPtr(fn)] = fn("[xpf]")
+	}
+}
+
+// getFuncPtr extracts a comparable pointer from a function value.
+func getFuncPtr(fn func(a ...interface{}) string) uintptr {
+	return reflect.ValueOf(fn).Pointer()
+}
+
+func printLog(prefixFunc func(a ...interface{}) string, format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
 
-	// Standard Print
-	fmt.Printf("%s %s\n", prefix(prefixFunc), msg)
+	// Use cached prefix if available, otherwise compute on the fly
+	p, ok := gradientPrefixCache[getFuncPtr(prefixFunc)]
+	if !ok {
+		p = prefixFunc("[xpf]")
+	}
+	fmt.Printf("%s %s\n", p, msg)
 }
 
 func LogInfo(format string, a ...interface{}) {

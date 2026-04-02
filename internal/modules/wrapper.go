@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"os/exec"
+	"sync"
 	"xpfarm/pkg/utils"
 )
 
@@ -26,7 +27,7 @@ type Module interface {
 	Run(ctx context.Context, target string) (string, error)
 }
 
-// RunUpdates checks for updates for all ProjectDiscovery tools.
+// RunUpdates checks for updates for all ProjectDiscovery tools in parallel.
 func RunUpdates() {
 	utils.LogInfo("Checking for updates...")
 
@@ -35,10 +36,15 @@ func RunUpdates() {
 		"urlfinder", "nuclei", "vulnx", // cvemap is vulnx
 	}
 
-	// Maybe run in parallel? But sequential is safer for output order.
+	var wg sync.WaitGroup
 	for _, tool := range pdTools {
-		checkToolUpdate(tool)
+		wg.Add(1)
+		go func(t string) {
+			defer wg.Done()
+			checkToolUpdate(t)
+		}(tool)
 	}
+	wg.Wait()
 
 	utils.LogSuccess("Running latest versions.")
 }

@@ -38,37 +38,40 @@ type colDef struct {
 	label  string
 }
 
+// catalogMap is initialized once — avoids allocating a new map on every search request.
+var catalogMap = map[string]colDef{
+	"target.value":     {table: "targets", column: "value", label: "Target"},
+	"target.type":      {table: "targets", column: "type", label: "Target Type"},
+	"target.status":    {table: "targets", column: "status", label: "Status"},
+	"asset.name":       {table: "assets", column: "name", label: "Asset"},
+	"web.url":          {table: "web_assets", column: "url", label: "URL"},
+	"web.title":        {table: "web_assets", column: "title", label: "Page Title"},
+	"web.tech_stack":   {table: "web_assets", column: "tech_stack", label: "Tech Stack"},
+	"web.status_code":  {table: "web_assets", column: "status_code", label: "Status Code"},
+	"web.web_server":   {table: "web_assets", column: "web_server", label: "Web Server"},
+	"web.content_type": {table: "web_assets", column: "content_type", label: "Content Type"},
+	"web.location":     {table: "web_assets", column: "location", label: "Redirect"},
+	"web.ip":           {table: "web_assets", column: "ip", label: "Resolved IP"},
+	"web.paths":        {table: "web_assets", column: "katana_output", label: "Discovered Paths"},
+	"port.port":        {table: "ports", column: "port", label: "Port"},
+	"port.protocol":    {table: "ports", column: "protocol", label: "Protocol"},
+	"port.service":     {table: "ports", column: "service", label: "Service"},
+	"port.product":     {table: "ports", column: "product", label: "Product"},
+	"port.version":     {table: "ports", column: "version", label: "Version"},
+	"vuln.name":        {table: "vulnerabilities", column: "name", label: "Vuln Name"},
+	"vuln.severity":    {table: "vulnerabilities", column: "severity", label: "Severity"},
+	"vuln.template_id": {table: "vulnerabilities", column: "template_id", label: "Template ID"},
+	"vuln.matcher":     {table: "vulnerabilities", column: "matcher_name", label: "Matcher"},
+	"vuln.extracted":   {table: "vulnerabilities", column: "extracted_results", label: "Extracted"},
+	"cve.id":           {table: "cves", column: "cve_id", label: "CVE ID"},
+	"cve.severity":     {table: "cves", column: "severity", label: "CVE Severity"},
+	"cve.product":      {table: "cves", column: "product", label: "CVE Product"},
+	"cve.cvss_score":   {table: "cves", column: "cvss_score", label: "CVSS"},
+	"cve.epss_score":   {table: "cves", column: "epss_score", label: "EPSS"},
+}
+
 func catalog() map[string]colDef {
-	return map[string]colDef{
-		"target.value":     {table: "targets", column: "value", label: "Target"},
-		"target.type":      {table: "targets", column: "type", label: "Target Type"},
-		"target.status":    {table: "targets", column: "status", label: "Status"},
-		"asset.name":       {table: "assets", column: "name", label: "Asset"},
-		"web.url":          {table: "web_assets", column: "url", label: "URL"},
-		"web.title":        {table: "web_assets", column: "title", label: "Page Title"},
-		"web.tech_stack":   {table: "web_assets", column: "tech_stack", label: "Tech Stack"},
-		"web.status_code":  {table: "web_assets", column: "status_code", label: "Status Code"},
-		"web.web_server":   {table: "web_assets", column: "web_server", label: "Web Server"},
-		"web.content_type": {table: "web_assets", column: "content_type", label: "Content Type"},
-		"web.location":     {table: "web_assets", column: "location", label: "Redirect"},
-		"web.ip":           {table: "web_assets", column: "ip", label: "Resolved IP"},
-		"web.paths":        {table: "web_assets", column: "katana_output", label: "Discovered Paths"},
-		"port.port":        {table: "ports", column: "port", label: "Port"},
-		"port.protocol":    {table: "ports", column: "protocol", label: "Protocol"},
-		"port.service":     {table: "ports", column: "service", label: "Service"},
-		"port.product":     {table: "ports", column: "product", label: "Product"},
-		"port.version":     {table: "ports", column: "version", label: "Version"},
-		"vuln.name":        {table: "vulnerabilities", column: "name", label: "Vuln Name"},
-		"vuln.severity":    {table: "vulnerabilities", column: "severity", label: "Severity"},
-		"vuln.template_id": {table: "vulnerabilities", column: "template_id", label: "Template ID"},
-		"vuln.matcher":     {table: "vulnerabilities", column: "matcher_name", label: "Matcher"},
-		"vuln.extracted":   {table: "vulnerabilities", column: "extracted_results", label: "Extracted"},
-		"cve.id":           {table: "cves", column: "cve_id", label: "CVE ID"},
-		"cve.severity":     {table: "cves", column: "severity", label: "CVE Severity"},
-		"cve.product":      {table: "cves", column: "product", label: "CVE Product"},
-		"cve.cvss_score":   {table: "cves", column: "cvss_score", label: "CVSS"},
-		"cve.epss_score":   {table: "cves", column: "epss_score", label: "EPSS"},
-	}
+	return catalogMap
 }
 
 func defaultColumns(source string) []string {
@@ -218,7 +221,7 @@ func GlobalSearch(payload SearchPayload) ([]map[string]interface{}, error) {
 	} else {
 		query = query.Select(selectStr)
 	}
-	query = query.Limit(10000)
+	query = query.Limit(2000)
 
 	// Execute
 	rows, err := query.Rows()
@@ -322,12 +325,21 @@ func matchesFilters(row map[string]interface{}, filters []regexFilter) bool {
 // explodePaths takes rows and, for the given field key, parses each value as
 // a JSON array of strings and expands it into one row per element.
 // Other columns in the row are preserved as-is.
+// maxPathsPerRow caps how many paths are exploded from a single row to prevent OOM.
+const maxPathsPerRow = 100
+
+// maxExplodedRows caps total rows after path explosion to prevent memory exhaustion.
+const maxExplodedRows = 50000
+
 func explodePaths(rows []map[string]interface{}, field string) []map[string]interface{} {
-	var out []map[string]interface{}
+	out := make([]map[string]interface{}, 0, len(rows))
 	for _, row := range rows {
 		raw, ok := row[field]
 		if !ok || raw == nil || raw == "" {
 			out = append(out, row)
+			if len(out) >= maxExplodedRows {
+				break
+			}
 			continue
 		}
 		str := fmt.Sprintf("%v", raw)
@@ -335,11 +347,21 @@ func explodePaths(rows []map[string]interface{}, field string) []map[string]inte
 		if err := json.Unmarshal([]byte(str), &paths); err != nil {
 			// Not valid JSON array — keep as-is
 			out = append(out, row)
+			if len(out) >= maxExplodedRows {
+				break
+			}
 			continue
 		}
 		if len(paths) == 0 {
 			out = append(out, row)
+			if len(out) >= maxExplodedRows {
+				break
+			}
 			continue
+		}
+		// Cap paths per row to prevent single row from exploding into thousands
+		if len(paths) > maxPathsPerRow {
+			paths = paths[:maxPathsPerRow]
 		}
 		for _, p := range paths {
 			newRow := make(map[string]interface{})
@@ -348,6 +370,12 @@ func explodePaths(rows []map[string]interface{}, field string) []map[string]inte
 			}
 			newRow[field] = p
 			out = append(out, newRow)
+			if len(out) >= maxExplodedRows {
+				break
+			}
+		}
+		if len(out) >= maxExplodedRows {
+			break
 		}
 	}
 	return out
