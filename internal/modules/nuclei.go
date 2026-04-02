@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"xpfarm/pkg/utils"
@@ -63,6 +64,7 @@ func (n *Nuclei) Run(ctx context.Context, target string) (string, error) {
 }
 
 // RunRaw executes nuclei with the exact arguments provided.
+// Output is capped at 50MB to prevent OOM on very large scans.
 func (n *Nuclei) RunRaw(ctx context.Context, args []string) (string, error) {
 	path := utils.ResolveBinaryPath("nuclei")
 	baseArgs := []string{"-c", "25", "-rl", "150", "-duc"}
@@ -72,9 +74,24 @@ func (n *Nuclei) RunRaw(ctx context.Context, args []string) (string, error) {
 
 	utils.LogInfo("[Nuclei] Running: %s %s", path, strings.Join(fullArgs, " "))
 	cmd := exec.CommandContext(ctx, path, fullArgs...)
-	output, err := cmd.CombinedOutput()
+
+	// Use a pipe + LimitReader to prevent unbounded memory usage
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return string(output), fmt.Errorf("nuclei failed: %v", err)
+		return "", fmt.Errorf("nuclei pipe failed: %v", err)
+	}
+	cmd.Stderr = cmd.Stdout // merge stderr into stdout pipe
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("nuclei failed to start: %v", err)
+	}
+
+	const maxOutput = 50 * 1024 * 1024 // 50MB
+	limited := io.LimitReader(stdout, maxOutput)
+	output, _ := io.ReadAll(limited)
+
+	if cmdErr := cmd.Wait(); cmdErr != nil {
+		return string(output), fmt.Errorf("nuclei failed: %v", cmdErr)
 	}
 	return string(output), nil
 }

@@ -30,11 +30,11 @@
 <div class="tabs" style="margin-bottom: 20px; border-bottom: 1px solid var(--border-color);">
     <button class="tab-btn active" onclick="showTab(event, 'overview')"><b><i>Overview</i></b></button>
     <button class="tab-btn" onclick="showTab(event, 'subdomains')">Subdomains <span class="badge"
-            style="background:var(--bg-hover); color:white;">{{len .Target.Subdomains}}</span></button>
+            style="background:var(--bg-hover); color:white;">{{.SubCount}}</span></button>
     <button class="tab-btn" onclick="showTab(event, 'network')">Network <span class="badge"
-            style="background:var(--bg-hover); color:white;">{{len .Target.Ports}}</span></button>
+            style="background:var(--bg-hover); color:white;">{{.PortsCount}}</span></button>
     <button class="tab-btn" onclick="showTab(event, 'web')">Web <span class="badge"
-            style="background:var(--bg-hover); color:white;">{{len .Target.WebAssets}}</span></button>
+            style="background:var(--bg-hover); color:white;">{{.WebCount}}</span></button>
     <button class="tab-btn" onclick="showTab(event, 'vulns')">Vulnerabilities <span class="badge"
             style="background:var(--bg-hover); color:white;">{{.VulnCount}}</span></button>
     <button class="tab-btn" onclick="showTab(event, 'logs')">Raw Logs</button>
@@ -45,11 +45,11 @@
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
         <div class="card">
             <h3>Open Ports</h3>
-            <p style="font-size: 2rem; font-weight: bold; color: var(--color-secondary);">{{len .Target.Ports}}</p>
+            <p style="font-size: 2rem; font-weight: bold; color: var(--color-secondary);">{{.PortsCount}}</p>
         </div>
         <div class="card">
             <h3>Web Assets</h3>
-            <p style="font-size: 2rem; font-weight: bold; color: #3b82f6;">{{len .Target.WebAssets}}</p>
+            <p style="font-size: 2rem; font-weight: bold; color: #3b82f6;">{{.WebCount}}</p>
         </div>
         <div class="card">
             <h3>Vulnerabilities</h3>
@@ -57,523 +57,43 @@
         </div>
         <div class="card">
             <h3>Subdomains</h3>
-            <p style="font-size: 2rem; font-weight: bold; color: #a855f7;">{{len .Target.Subdomains}}</p>
+            <p style="font-size: 2rem; font-weight: bold; color: #a855f7;">{{.SubCount}}</p>
         </div>
     </div>
 </div>
 
-<!-- Subdomains Tab -->
+<!-- Subdomains Tab (lazy-loaded) -->
 <div id="subdomains" class="tab-content">
     <div class="card">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>Subdomain</th>
-                    <th>Status</th>
-                    <th>Last Seen</th>
-                </tr>
-            </thead>
-            <tbody>
-                {{range .Target.Subdomains}}
-                <tr>
-                    <td><a href="/target/{{.ID}}" style="color: var(--color-primary);">{{.Value}}</a></td>
-                    <td>{{if .IsAlive}}Alive{{else}}Unreachable{{end}}</td>
-                    <td>{{.UpdatedAt.Format "Jan 02, 15:04"}}</td>
-                </tr>
-                {{else}}
-                <tr>
-                    <td colspan="3" class="text-muted">No subdomains found yet.</td>
-                </tr>
-                {{end}}
-            </tbody>
-        </table>
+        <div class="tab-loader" style="text-align: center; padding: 40px; color: var(--color-muted);">Loading subdomains...</div>
     </div>
 </div>
 
-<!-- Network/Ports Tab -->
+<!-- Network/Ports Tab (lazy-loaded) -->
 <div id="network" class="tab-content">
     <div class="card">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>Port</th>
-                    <th>Protocol</th>
-                    <th>Service</th>
-                    <th>Product</th>
-                    <th>Version</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {{range .Target.Ports}}
-                <tr>
-                    <td>{{.Port}}</td>
-                    <td>{{.Protocol}}</td>
-                    <td>{{.Service}}</td>
-                    <td>{{.Product}}</td>
-                    <td>{{.Version}}</td>
-                    <td style="text-align: right;">
-                        {{if .Scripts}}
-                        <button onclick="toggleRow('row-{{.ID}}')"
-                            style="background:none; border:none; cursor:pointer; color: var(--color-primary);">
-                            &#9660;
-                        </button>
-                        {{end}}
-                    </td>
-                </tr>
-                {{if .Scripts}}
-                <tr id="row-{{.ID}}" style="display:none; background: rgba(255,255,255,0.03);">
-                    <td colspan="6" style="border-bottom: 2px solid var(--border-color);">
-                        <div style="padding: 10px;">
-                            <strong style="display:block; margin-bottom: 5px; color: var(--color-muted);">Script
-                                Output:</strong>
-                            <pre
-                                style="margin: 0; font-family: monospace; color: #d4d4d4; white-space: pre-wrap; font-size: 0.85rem;">{{.Scripts}}</pre>
-                        </div>
-                    </td>
-                </tr>
-                {{end}}
-                {{else}}
-                <tr>
-                    <td colspan="6" class="text-muted">No open ports found yet.</td>
-                </tr>
-                {{end}}
-            </tbody>
-        </table>
+        <div class="tab-loader" style="text-align: center; padding: 40px; color: var(--color-muted);">Loading ports...</div>
     </div>
 </div>
 
-<!-- Web Assets Tab -->
+<!-- Web Assets Tab (lazy-loaded) -->
 <div id="web" class="tab-content">
     <div class="card">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>URL</th>
-                    <th>Title</th>
-                    <th>Tech</th>
-                    <th>Status</th>
-                    <th>Screenshot</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {{range .Target.WebAssets}}
-                <tr>
-                    <td><a href="{{.URL}}" target="_blank" style="color: var(--color-primary);">{{.URL}}</a></td>
-                    <td>{{.Title}}</td>
-                    <td>{{.TechStack}}</td>
-                    <td><span class="badge"
-                            style="background: {{if eq .StatusCode 200}}var(--color-secondary){{else}}var(--bg-hover){{end}}">{{.StatusCode}}</span>
-                    </td>
-                    <td>
-                        {{if .Screenshot}}
-                        <img src="/{{.Screenshot}}" alt="Screenshot"
-                            style="width: 50px; height: 35px; object-fit: cover; cursor: pointer; border: 1px solid var(--border-color); border-radius: 4px;"
-                            onclick="showImage('/{{.Screenshot}}')">
-                        {{else}}
-                        -
-                        {{end}}
-                    </td>
-                    <td style="text-align: right;">
-                        <button onclick="toggleRow('web-row-{{.ID}}')"
-                            style="background:none; border:none; cursor:pointer; color: var(--color-primary);">
-                            &#9660;
-                        </button>
-                    </td>
-                </tr>
-                <tr id="web-row-{{.ID}}" style="display:none; background: rgba(255,255,255,0.03);">
-                    <td colspan="6" style="border-bottom: 2px solid var(--border-color);">
-                        <div
-                            style="padding: 15px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; font-size: 0.9rem;">
-                            {{if .WebServer}}<div><strong style="color: var(--color-muted);">Web Server:</strong>
-                                {{.WebServer}}</div>{{end}}
-                            {{if .IP}}<div><strong style="color: var(--color-muted);">IP:</strong> {{.IP}}</div>{{end}}
-                            {{if .CNAME}}<div><strong style="color: var(--color-muted);">CNAME:</strong> {{.CNAME}}
-                            </div>{{end}}
-                            {{if .CDN}}<div><strong style="color: var(--color-muted);">CDN:</strong> {{.CDN}}</div>
-                            {{end}}
-                            {{if .Location}}<div><strong style="color: var(--color-muted);">Redirect To:</strong>
-                                {{.Location}}</div>{{end}}
-                            {{if .ContentType}}<div><strong style="color: var(--color-muted);">Content Type:</strong>
-                                {{.ContentType}}</div>{{end}}
-                            <div><strong style="color: var(--color-muted);">Size:</strong> {{.ContentLen}} bytes</div>
-                            <div><strong style="color: var(--color-muted);">Words/Lines:</strong> {{.WordCount}} /
-                                {{.LineCount}}</div>
-                        </div>
-
-                        {{if .KatanaOutput}}
-                        <div style="padding: 0 15px 15px 15px;">
-                            <div
-                                style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
-                                <strong style="color: var(--color-muted);">Discovered Paths:</strong>
-                                <button onclick="copyAllPaths('katana-raw-data-{{.ID}}', this)"
-                                    title="Copy all paths to clipboard"
-                                    style="background:none; border:1px solid var(--border-color); border-radius:4px; cursor:pointer; padding:3px 10px; color:var(--color-muted); font-size:0.75rem; transition: all 0.2s;">
-                                    Copy All
-                                </button>
-                            </div>
-                            <div id="katana-tree-{{.ID}}"
-                                style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; max-height: 600px; overflow-y: auto;">
-                            </div>
-                            <script id="katana-raw-data-{{.ID}}"
-                                type="application/json">{{ json .KatanaOutput }}</script>
-                            <script>
-                                (function () {
-                                    try {
-                                        var treeContainer = document.getElementById('katana-tree-{{.ID}}');
-                                        var rawElement = document.getElementById('katana-raw-data-{{.ID}}');
-                                        if (!rawElement || !treeContainer) return;
-
-                                        var rawContent = rawElement.textContent;
-                                        var paths = [];
-
-                                        // 1. Attempt JSON parsing
-                                        try {
-                                            paths = JSON.parse(rawContent);
-                                        } catch (e) {
-                                            paths = rawContent;
-                                        }
-
-                                        // 2. Resolve nested strings or newline-separated content
-                                        if (typeof paths === 'string') {
-                                            var trimmed = paths.trim();
-                                            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-                                                try {
-                                                    paths = JSON.parse(trimmed);
-                                                } catch (e) {
-                                                    // Fallback to regex split for mixed content
-                                                    paths = trimmed.split(/\r?\n/);
-                                                }
-                                            } else {
-                                                paths = trimmed.split(/\r?\n/);
-                                            }
-                                        }
-
-                                        // 3. Normalize to Non-Empty Array
-                                        if (Array.isArray(paths)) {
-                                            paths = paths.filter(function (p) { return p && typeof p === 'string' && p.trim() !== ""; });
-                                        } else {
-                                            // Should not happen if logic above is correct, but safety net
-                                            paths = [];
-                                        }
-
-                                        if (paths.length === 0) {
-                                            treeContainer.innerHTML = '<span class="text-muted">No paths found.</span>';
-                                            return;
-                                        }
-
-                                        // 4. Build Tree Structure
-                                        var tree = {};
-                                        paths.forEach(function (path) {
-                                            // Handle URL vs Path: remove protocol/domain if present to reduce noise?
-                                            // User requested "Discovered Paths".
-                                            // If path is full URL, we split by /
-                                            // https://example.com/foo -> ["https:", "", "example.com", "foo"]
-                                            // Filter empty -> ["https:", "example.com", "foo"]
-                                            var parts = path.split('/').filter(p => p !== "");
-                                            var current = tree;
-                                            parts.forEach(function (part) {
-                                                if (!current[part]) {
-                                                    current[part] = {};
-                                                }
-                                                current = current[part];
-                                            });
-                                        });
-
-                                        // 5. Render Tree Logic
-                                        function renderNode(node, name, parentPath) {
-                                            var keys = Object.keys(node).sort();
-                                            var isLeaf = keys.length === 0;
-                                            var currentPath = parentPath ? parentPath + "/" + name : name;
-                                            var container = document.createElement('div');
-                                            container.style.marginLeft = "20px";
-                                            container.style.lineHeight = "1.5";
-                                            var label = document.createElement('div');
-                                            label.style.fontFamily = "monospace";
-
-                                            // Copy handling logic
-                                            label.onclick = function (e) {
-                                                e.stopPropagation();
-                                                // If leaf or node, allow copy?
-                                                // If node has children, toggle visibility instead?
-                                                // Let's implement BOTH: Click name to toggle, Icon to copy? 
-                                                // Or just keep it simple.
-                                                // User asked "Click to copy full path" previously.
-                                                // And collapse/expand.
-
-                                                if (!isLeaf) {
-                                                    // Toggle children
-                                                    var childDiv = container.querySelector('.children-container');
-                                                    if (childDiv) {
-                                                        childDiv.style.display = childDiv.style.display === "none" ? "block" : "none";
-                                                    }
-                                                } else {
-                                                    // Copy leaf path
-                                                    // Reconstruct full path approximately
-                                                    // Note: this reconstruction might be partial if inputs were paths not URLs
-                                                    navigator.clipboard.writeText(currentPath).then(function () {
-                                                        var originalText = label.textContent;
-                                                        label.textContent = name + " (Copied!)";
-                                                        setTimeout(function () { label.textContent = name; }, 1000);
-                                                    });
-                                                }
-                                            };
-
-                                            if (isLeaf) {
-                                                label.style.color = "#9ca3af";
-                                                label.style.cursor = "pointer";
-                                                label.title = "Click to copy";
-                                                label.textContent = name;
-                                            } else {
-                                                label.style.color = "#e5e7eb";
-                                                label.style.cursor = "pointer";
-                                                label.textContent = name + "/";
-                                            }
-
-                                            container.appendChild(label);
-
-                                            if (!isLeaf) {
-                                                var childrenContainer = document.createElement('div');
-                                                childrenContainer.className = 'children-container';
-                                                childrenContainer.style.display = "block"; // Changed to BLOCK (Expanded) by default
-
-                                                keys.forEach(function (key) {
-                                                    childrenContainer.appendChild(renderNode(node[key], key, currentPath));
-                                                });
-                                                container.appendChild(childrenContainer);
-                                            }
-                                            return container;
-                                        }
-
-                                        // 6. Append to Container
-                                        treeContainer.innerHTML = ""; // Clear existing
-                                        var rootKeys = Object.keys(tree).sort();
-
-                                        if (rootKeys.length === 0) {
-                                            // Fallback if tree build failed but paths > 0 (e.g. all empty parts?)
-                                            // Should have been caught by filter, but just in case
-                                            treeContainer.innerHTML = '<span class="text-muted">No paths found.</span>';
-                                        } else {
-                                            rootKeys.forEach(function (key) {
-                                                treeContainer.appendChild(renderNode(tree[key], key, ""));
-                                            });
-                                            // Handle special root path case if just "/"
-                                            if (rootKeys.length === 0 && paths.some(p => p === "/")) {
-                                                var div = document.createElement('div');
-                                                div.textContent = "/";
-                                                div.style.marginLeft = "20px";
-                                                div.style.color = "#9ca3af";
-                                                treeContainer.appendChild(div);
-                                            }
-                                        }
-                                    } catch (err) {
-                                        console.error("Katana Tree Error:", err);
-                                        var tc = document.getElementById('katana-tree-{{.ID}}');
-                                        if (tc) tc.innerHTML = '<div style="color:red; font-size:0.8rem;">Error rendering paths: ' + err.message + '</div>';
-                                    }
-                                })();
-                            </script>
-                        </div>
-                        {{end}}
-                    </td>
-                </tr>
-                {{else}}
-                <tr>
-                    <td colspan="6" class="text-muted">No web assets found yet.</td>
-                </tr>
-                {{end}}
-            </tbody>
-        </table>
+        <div class="tab-loader" style="text-align: center; padding: 40px; color: var(--color-muted);">Loading web assets...</div>
     </div>
 </div>
 
-<!-- Vulnerabilities Tab -->
+<!-- Vulnerabilities Tab (lazy-loaded) -->
 <div id="vulns" class="tab-content">
-    <!-- Nuclei Findings (Grouped by Severity) -->
-    {{if .Target.Vulns}}
-    <div class="card" style="margin-bottom: 20px;">
-        <h3 style="margin-bottom: 15px; font-size: 1.15rem;">Nuclei Findings</h3>
-        {{range $sev := $.SeverityOrder}}
-        {{$vulns := index $.VulnsBySeverity $sev}}
-        {{if $vulns}}
-        <div
-            style="border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 12px; padding: 0; background: rgba(255,255,255,0.02);">
-            <div onclick="toggleBlock('vuln-sev-{{$sev}}')"
-                style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 14px;">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    {{if eq $sev "critical"}}<span class="badge"
-                        style="background:#7f1d1d;color:#fecaca;padding:3px 10px;font-size:0.8rem;text-transform:capitalize">{{$sev}}</span>{{else
-                    if eq $sev "high"}}<span class="badge"
-                        style="background:#991b1b;color:#fecaca;padding:3px 10px;font-size:0.8rem;text-transform:capitalize">{{$sev}}</span>{{else
-                    if eq $sev
-                    "medium"}}<span class="badge"
-                        style="background:#9a3412;color:#fed7aa;padding:3px 10px;font-size:0.8rem;text-transform:capitalize">{{$sev}}</span>{{else
-                    if eq
-                    $sev "low"}}<span class="badge"
-                        style="background:#166534;color:#bbf7d0;padding:3px 10px;font-size:0.8rem;text-transform:capitalize">{{$sev}}</span>{{else}}<span
-                        class="badge"
-                        style="background:#1e40af;color:#bfdbfe;padding:3px 10px;font-size:0.8rem;text-transform:capitalize">{{$sev}}</span>{{end}}
-                    <span style="color: var(--color-muted); font-size: 0.95rem;">{{len $vulns}} findings</span>
-                </div>
-                <!-- Matched EXACTLY to web assets arrow button (line 183-186) -->
-                <button style="background:none; border:none; cursor:pointer; color: var(--color-primary);">
-                    &#9660;
-                </button>
-            </div>
-            <div id="vuln-sev-{{$sev}}" style="display: none;">
-                <table class="table" style="width: 100%;">
-                    <thead>
-                        <tr>
-                            <th>Template</th>
-                            <th>Name</th>
-                            <th>Matcher</th>
-                            <th>Description</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{range $vulns}}
-                        <tr style="transition: background 0.2s;"
-                            onmouseover="this.style.background='rgba(255,255,255,0.04)'"
-                            onmouseout="this.style.background='transparent'">
-                            <td style="font-family: monospace; color: var(--color-primary);">
-                                {{.TemplateID}}</td>
-                            <td>{{.Name}}</td>
-                            <td>{{.MatcherName}}</td>
-                            <td style="color: var(--color-muted); max-width: 350px;">
-                                {{.Description}}</td>
-                        </tr>
-                        {{end}}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {{end}}
-        {{end}}
-    </div>
-    {{end}}
-
-    <!-- Known Product CVEs from Cvemap -->
-    {{if .CVEsByProduct}}
     <div class="card">
-        <div onclick="toggleBlock('cve-products-section')"
-            style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-            <h3 style="margin: 0;">Miscellaneous CVEs for Products</h3>
-            <!-- Matched EXACTLY to web assets arrow button -->
-            <button style="background:none; border:none; cursor:pointer; color: var(--color-primary);">
-                &#9660;
-            </button>
-        </div>
-        <div id="cve-products-section" style="display: none; margin-top: 15px;">
-            {{range $product, $cves := .CVEsByProduct}}
-            <div
-                style="border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 12px; padding: 0; background: rgba(255,255,255,0.02);">
-                <div onclick="toggleBlock('cve-product-{{$product}}')"
-                    style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 14px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <h4 style="margin: 0; text-transform: capitalize;">{{$product}}</h4>
-                        <span class="badge" style="background: var(--bg-hover); color: white;">{{len $cves}} CVEs</span>
-                    </div>
-                    <div style="display: flex; gap: 5px; align-items: center;">
-                        {{range $cves}}
-                        {{if eq .Severity "critical"}}<span
-                            style="width:8px;height:8px;border-radius:50%;background:#dc2626;display:inline-block"
-                            title="Critical"></span>
-                        {{else if eq .Severity "high"}}<span
-                            style="width:8px;height:8px;border-radius:50%;background:#f97316;display:inline-block"
-                            title="High"></span>
-                        {{else if eq .Severity "medium"}}<span
-                            style="width:8px;height:8px;border-radius:50%;background:#eab308;display:inline-block"
-                            title="Medium"></span>
-                        {{end}}
-                        {{end}}
-                        <!-- Matched EXACTLY to web assets arrow button -->
-                        <button
-                            style="background:none; border:none; cursor:pointer; color: var(--color-primary); margin-left: 5px;">
-                            &#9660;
-                        </button>
-                    </div>
-                </div>
-                <div id="cve-product-{{$product}}" style="display: none;">
-                    <table class="table" style="width: 100%;">
-                        <thead>
-                            <tr>
-                                <th>CVE ID</th>
-                                <th>Severity</th>
-                                <th>CVSS</th>
-                                <th>EPSS</th>
-                                <th>KEV</th>
-                                <th>PoC</th>
-                                <th>Template</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range $cves}}
-                            <tr style="transition: background 0.2s;"
-                                onmouseover="this.style.background='rgba(255,255,255,0.04)'"
-                                onmouseout="this.style.background='transparent'">
-                                <td><a href="https://nvd.nist.gov/vuln/detail/{{.CveID}}" target="_blank"
-                                        style="color: var(--color-primary);">{{.CveID}}</a></td>
-                                <td>
-                                    {{if eq .Severity "critical"}}<span class="badge"
-                                        style="background:#7f1d1d;color:#fecaca">{{.Severity}}</span>{{else if eq
-                                    .Severity
-                                    "high"}}<span class="badge"
-                                        style="background:#991b1b;color:#fecaca">{{.Severity}}</span>{{else if eq
-                                    .Severity
-                                    "medium"}}<span class="badge"
-                                        style="background:#9a3412;color:#fed7aa">{{.Severity}}</span>{{else if eq
-                                    .Severity
-                                    "low"}}<span class="badge"
-                                        style="background:#166534;color:#bbf7d0">{{.Severity}}</span>{{else}}<span
-                                        class="badge"
-                                        style="background:#1e40af;color:#bfdbfe">{{.Severity}}</span>{{end}}
-                                </td>
-                                <td style="font-family: monospace;">{{printf "%.1f" .CvssScore}}</td>
-                                <td style="font-family: monospace;">{{printf "%.4f" .EpssScore}}</td>
-                                <td>{{if .IsKEV}}<span
-                                        style="color:#ef4444;font-weight:bold">&#10003;</span>{{else}}<span
-                                        style="color:var(--color-muted)">&#10007;</span>{{end}}</td>
-                                <td>{{if .HasPOC}}<span
-                                        style="color:#f59e0b;font-weight:bold">&#10003;</span>{{else}}<span
-                                        style="color:var(--color-muted)">&#10007;</span>{{end}}</td>
-                                <td>{{if .HasTemplate}}<span
-                                        style="color:var(--color-secondary);font-weight:bold">&#10003;</span>{{else}}<span
-                                        style="color:var(--color-muted)">&#10007;</span>{{end}}</td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            {{end}}
-        </div>
+        <div class="tab-loader" style="text-align: center; padding: 40px; color: var(--color-muted);">Loading vulnerabilities...</div>
     </div>
-    {{end}}
-
-    {{if and (not .Target.Vulns) (not .CVEsByProduct)}}
-    <div class="card">
-        <p class="text-muted">No vulnerabilities found yet.</p>
-    </div>
-    {{end}}
 </div>
 
-
-<!-- Raw Logs Tab -->
+<!-- Raw Logs Tab (lazy-loaded) -->
 <div id="logs" class="tab-content">
     <div class="card">
-        {{range .Target.Results}}
-        <div style="margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                <span style="font-weight: bold; color: var(--color-primary);">{{.ToolName}}</span>
-                <span style="color: var(--color-muted); font-size: 0.8em;">{{.CreatedAt.Format "Jan 02, 15:04"}}</span>
-            </div>
-            <pre
-                style="background: black; padding: 10px; border-radius: 4px; overflow-x: auto; max-height: 200px;">{{.Output}}</pre>
-        </div>
-        {{else}}
-        <p class="text-muted">No raw logs available.</p>
-        {{end}}
+        <div class="tab-loader" style="text-align: center; padding: 40px; color: var(--color-muted);">Loading raw logs...</div>
     </div>
 </div>
 
@@ -640,6 +160,43 @@
         font-size: 0.8rem;
         background: var(--bg-hover);
     }
+
+    /* Katana Tree */
+    .ktree-row {
+        border-radius: 3px;
+        padding: 0 4px;
+        transition: background 0.15s;
+    }
+
+    .ktree-row:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .ktree-copy {
+        opacity: 0;
+        cursor: pointer;
+        color: #6b7280;
+        font-size: 0.85rem;
+        transition: opacity 0.15s, color 0.15s;
+        user-select: none;
+    }
+
+    .ktree-row:hover .ktree-copy {
+        opacity: 1;
+    }
+
+    .ktree-copy:hover {
+        color: var(--color-primary);
+    }
+
+    .ktree-dir:hover {
+        text-decoration: underline;
+    }
+
+    .ktree-arrow {
+        font-size: 0.75rem;
+        transition: color 0.15s;
+    }
 </style>
 
 <!-- Image Modal -->
@@ -650,6 +207,9 @@
 </div>
 
 <script>
+    var targetId = {{.Target.ID}};
+    var loadedTabs = {};
+
     function showTab(evt, tabName) {
         var i, tabcontent, tablinks;
         tabcontent = document.getElementsByClassName("tab-content");
@@ -670,11 +230,368 @@
                 }
             }
         }
-        sessionStorage.setItem('activeTargetTab-{{.Target.ID}}', tabName);
+        sessionStorage.setItem('activeTargetTab-' + targetId, tabName);
+
+        // Lazy-load tab data
+        if (!loadedTabs[tabName] && tabName !== 'overview') {
+            loadTabData(tabName);
+        }
+    }
+
+    function loadTabData(tabName) {
+        loadedTabs[tabName] = true;
+        var container = document.getElementById(tabName);
+
+        switch (tabName) {
+            case 'subdomains':
+                fetch('/api/target/' + targetId + '/subdomains')
+                    .then(r => r.json())
+                    .then(data => renderSubdomains(container, data))
+                    .catch(e => container.innerHTML = '<div class="card"><p class="text-muted">Error loading subdomains.</p></div>');
+                break;
+            case 'network':
+                fetch('/api/target/' + targetId + '/ports')
+                    .then(r => r.json())
+                    .then(data => renderPorts(container, data))
+                    .catch(e => container.innerHTML = '<div class="card"><p class="text-muted">Error loading ports.</p></div>');
+                break;
+            case 'web':
+                fetch('/api/target/' + targetId + '/web')
+                    .then(r => r.json())
+                    .then(data => renderWebAssets(container, data))
+                    .catch(e => container.innerHTML = '<div class="card"><p class="text-muted">Error loading web assets.</p></div>');
+                break;
+            case 'vulns':
+                fetch('/api/target/' + targetId + '/vulns')
+                    .then(r => r.json())
+                    .then(data => renderVulns(container, data))
+                    .catch(e => container.innerHTML = '<div class="card"><p class="text-muted">Error loading vulnerabilities.</p></div>');
+                break;
+            case 'logs':
+                fetch('/api/target/' + targetId + '/logs')
+                    .then(r => r.json())
+                    .then(data => renderLogs(container, data))
+                    .catch(e => container.innerHTML = '<div class="card"><p class="text-muted">Error loading logs.</p></div>');
+                break;
+        }
+    }
+
+    function esc(str) {
+        if (!str) return '';
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+        if (!dateStr) return '';
+        var d = new Date(dateStr);
+        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return months[d.getMonth()] + ' ' + String(d.getDate()).padStart(2, '0') + ', ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    function renderSubdomains(container, data) {
+        if (!data || data.length === 0) {
+            container.innerHTML = '<div class="card"><table class="table"><tbody><tr><td class="text-muted">No subdomains found yet.</td></tr></tbody></table></div>';
+            return;
+        }
+        var html = '<div class="card"><table class="table"><thead><tr><th>Subdomain</th><th>Status</th><th>Last Seen</th></tr></thead><tbody>';
+        data.forEach(function(s) {
+            html += '<tr><td><a href="/target/' + s.id + '" style="color: var(--color-primary);">' + esc(s.value) + '</a></td>';
+            html += '<td>' + (s.is_alive ? 'Alive' : 'Unreachable') + '</td>';
+            html += '<td>' + formatDate(s.updated_at) + '</td></tr>';
+        });
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    function renderPorts(container, data) {
+        if (!data || data.length === 0) {
+            container.innerHTML = '<div class="card"><table class="table"><tbody><tr><td colspan="6" class="text-muted">No open ports found yet.</td></tr></tbody></table></div>';
+            return;
+        }
+        var html = '<div class="card"><table class="table"><thead><tr><th>Port</th><th>Protocol</th><th>Service</th><th>Product</th><th>Version</th><th></th></tr></thead><tbody>';
+        data.forEach(function(p) {
+            html += '<tr><td>' + p.port + '</td><td>' + esc(p.protocol) + '</td><td>' + esc(p.service) + '</td><td>' + esc(p.product) + '</td><td>' + esc(p.version) + '</td>';
+            html += '<td style="text-align:right;">';
+            if (p.scripts) {
+                html += '<button onclick="toggleRow(\'row-' + p.id + '\')" style="background:none; border:none; cursor:pointer; color: var(--color-primary);">&#9660;</button>';
+            }
+            html += '</td></tr>';
+            if (p.scripts) {
+                html += '<tr id="row-' + p.id + '" style="display:none; background: rgba(255,255,255,0.03);"><td colspan="6" style="border-bottom: 2px solid var(--border-color);"><div style="padding: 10px;">';
+                html += '<strong style="display:block; margin-bottom: 5px; color: var(--color-muted);">Script Output:</strong>';
+                html += '<pre style="margin: 0; font-family: monospace; color: #d4d4d4; white-space: pre-wrap; font-size: 0.85rem;">' + esc(p.scripts) + '</pre>';
+                html += '</div></td></tr>';
+            }
+        });
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    function renderWebAssets(container, data) {
+        if (!data || data.length === 0) {
+            container.innerHTML = '<div class="card"><table class="table"><tbody><tr><td colspan="6" class="text-muted">No web assets found yet.</td></tr></tbody></table></div>';
+            return;
+        }
+        var html = '<div class="card"><table class="table"><thead><tr><th>URL</th><th>Title</th><th>Tech</th><th>Status</th><th>Screenshot</th><th></th></tr></thead><tbody>';
+        data.forEach(function(w) {
+            var statusBg = w.status_code === 200 ? 'var(--color-secondary)' : 'var(--bg-hover)';
+            html += '<tr>';
+            html += '<td><a href="' + esc(w.url) + '" target="_blank" style="color: var(--color-primary);">' + esc(w.url) + '</a></td>';
+            html += '<td>' + esc(w.title) + '</td>';
+            html += '<td>' + esc(w.tech_stack) + '</td>';
+            html += '<td><span class="badge" style="background:' + statusBg + '">' + w.status_code + '</span></td>';
+            html += '<td>';
+            if (w.screenshot_path) {
+                html += '<img src="/' + esc(w.screenshot_path) + '" alt="Screenshot" style="width: 50px; height: 35px; object-fit: cover; cursor: pointer; border: 1px solid var(--border-color); border-radius: 4px;" onclick="showImage(\'/' + esc(w.screenshot_path) + '\')">';
+            } else {
+                html += '-';
+            }
+            html += '</td>';
+            html += '<td style="text-align: right;"><button onclick="toggleRow(\'web-row-' + w.id + '\')" style="background:none; border:none; cursor:pointer; color: var(--color-primary);">&#9660;</button></td>';
+            html += '</tr>';
+
+            // Expandable details row
+            html += '<tr id="web-row-' + w.id + '" style="display:none; background: rgba(255,255,255,0.03);"><td colspan="6" style="border-bottom: 2px solid var(--border-color);">';
+            html += '<div style="padding: 15px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; font-size: 0.9rem;">';
+            if (w.web_server) html += '<div><strong style="color: var(--color-muted);">Web Server:</strong> ' + esc(w.web_server) + '</div>';
+            if (w.ip) html += '<div><strong style="color: var(--color-muted);">IP:</strong> ' + esc(w.ip) + '</div>';
+            if (w.cname) html += '<div><strong style="color: var(--color-muted);">CNAME:</strong> ' + esc(w.cname) + '</div>';
+            if (w.cdn) html += '<div><strong style="color: var(--color-muted);">CDN:</strong> ' + esc(w.cdn) + '</div>';
+            if (w.location) html += '<div><strong style="color: var(--color-muted);">Redirect To:</strong> ' + esc(w.location) + '</div>';
+            if (w.content_type) html += '<div><strong style="color: var(--color-muted);">Content Type:</strong> ' + esc(w.content_type) + '</div>';
+            html += '<div><strong style="color: var(--color-muted);">Size:</strong> ' + w.content_length + ' bytes</div>';
+            html += '<div><strong style="color: var(--color-muted);">Words/Lines:</strong> ' + w.word_count + ' / ' + w.line_count + '</div>';
+            html += '</div>';
+
+            // Katana paths — only show when data exists
+            if (w.katana_output) {
+                html += '<div style="padding: 0 15px 15px 15px;">';
+                html += '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">';
+                html += '<strong style="color: var(--color-muted);">Discovered Paths:</strong>';
+                html += '</div>';
+                html += '<div id="katana-tree-' + w.id + '" style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; max-height: 600px; overflow-y: auto;">';
+                html += renderKatanaTree(w.katana_output);
+                html += '</div>';
+                html += '</div>';
+            }
+
+            html += '</td></tr>';
+        });
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    var _treeIdCounter = 0;
+
+    function copyPath(fullPath, el) {
+        navigator.clipboard.writeText(fullPath).then(function() {
+            // Show toast
+            var toast = document.getElementById('copy-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'copy-toast';
+                toast.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#10b981;color:#fff;padding:8px 18px;border-radius:6px;font-size:0.85rem;font-family:monospace;z-index:9999;opacity:0;transition:opacity 0.25s;pointer-events:none;';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = 'Copied: ' + fullPath;
+            toast.style.opacity = '1';
+            clearTimeout(toast._timer);
+            toast._timer = setTimeout(function() { toast.style.opacity = '0'; }, 1800);
+        });
+    }
+
+    function toggleTreeNode(id) {
+        var children = document.getElementById(id);
+        var arrow = document.getElementById('arrow-' + id);
+        if (!children) return;
+        if (children.style.display === 'none') {
+            children.style.display = 'block';
+            if (arrow) arrow.textContent = '▾';
+        } else {
+            children.style.display = 'none';
+            if (arrow) arrow.textContent = '▸';
+        }
+    }
+
+    function renderKatanaTree(rawOutput) {
+        try {
+            if (!rawOutput) return '<span class="text-muted" style="color: var(--color-muted); font-style: italic;">N/A</span>';
+            var paths = [];
+            if (typeof rawOutput === 'string') {
+                try { paths = JSON.parse(rawOutput); } catch(e) { paths = rawOutput.split(/\r?\n/); }
+            } else if (Array.isArray(rawOutput)) {
+                paths = rawOutput;
+            }
+            paths = paths.filter(function(p) { return p && typeof p === 'string' && p.trim() !== ''; });
+            if (paths.length === 0) return '<span class="text-muted" style="color: var(--color-muted); font-style: italic;">N/A</span>';
+
+            var tree = {};
+            paths.forEach(function(path) {
+                var parts = path.split('/').filter(function(p) { return p !== ''; });
+                var current = tree;
+                parts.forEach(function(part) {
+                    if (!current[part]) current[part] = {};
+                    current = current[part];
+                });
+            });
+
+            function buildHTML(node, depth, parentPath) {
+                var keys = Object.keys(node).sort();
+                var html = '';
+                keys.forEach(function(key) {
+                    var isLeaf = Object.keys(node[key]).length === 0;
+                    var fullPath = parentPath ? parentPath + '/' + key : '/' + key;
+                    _treeIdCounter++;
+                    var nodeId = 'kt-' + _treeIdCounter;
+
+                    if (isLeaf) {
+                        // Leaf node (file)
+                        html += '<div class="ktree-row" style="margin-left:' + (depth * 20) + 'px; line-height: 1.8; font-family: monospace; display: flex; align-items: center; gap: 6px;">';
+                        html += '<span style="color: #9ca3af;">' + esc(key) + '</span>';
+                        html += '<span class="ktree-copy" onclick="copyPath(\'' + esc(fullPath).replace(/'/g, "\\'") + '\', this)" title="Copy path">⧉</span>';
+                        html += '</div>';
+                    } else {
+                        // Directory node
+                        html += '<div class="ktree-row" style="margin-left:' + (depth * 20) + 'px; line-height: 1.8; font-family: monospace; display: flex; align-items: center; gap: 6px;">';
+                        html += '<span id="arrow-' + nodeId + '" class="ktree-arrow" onclick="toggleTreeNode(\'' + nodeId + '\')" style="cursor:pointer; user-select:none; width:12px; display:inline-block; color:#6b7280;">▾</span>';
+                        html += '<span class="ktree-dir" onclick="toggleTreeNode(\'' + nodeId + '\')" style="cursor:pointer; color:#e5e7eb;">' + esc(key) + '/</span>';
+                        html += '<span class="ktree-copy" onclick="copyPath(\'' + esc(fullPath).replace(/'/g, "\\'") + '/\', this)" title="Copy path">⧉</span>';
+                        html += '</div>';
+                        html += '<div id="' + nodeId + '">';
+                        html += buildHTML(node[key], depth + 1, fullPath);
+                        html += '</div>';
+                    }
+                });
+                return html;
+            }
+
+            return buildHTML(tree, 0, '');
+        } catch(e) {
+            return '<span style="color:red; font-size:0.8rem;">Error rendering paths</span>';
+        }
+    }
+
+    function renderVulns(container, data) {
+        if (!data) { container.innerHTML = '<div class="card"><p class="text-muted">No vulnerabilities found yet.</p></div>'; return; }
+
+        var vulns = data.vulns || [];
+        var cves = data.cves || [];
+
+        if (vulns.length === 0 && cves.length === 0) {
+            container.innerHTML = '<div class="card"><p class="text-muted">No vulnerabilities found yet.</p></div>';
+            return;
+        }
+
+        var html = '';
+
+        // Group vulns by severity
+        if (vulns.length > 0) {
+            var sevOrder = ['critical', 'high', 'medium', 'low', 'info'];
+            var bySev = {};
+            vulns.forEach(function(v) {
+                var s = v.severity || 'info';
+                if (!bySev[s]) bySev[s] = [];
+                bySev[s].push(v);
+            });
+
+            var sevColors = {
+                critical: { bg: '#7f1d1d', fg: '#fecaca' },
+                high: { bg: '#991b1b', fg: '#fecaca' },
+                medium: { bg: '#9a3412', fg: '#fed7aa' },
+                low: { bg: '#166534', fg: '#bbf7d0' },
+                info: { bg: '#1e40af', fg: '#bfdbfe' }
+            };
+
+            html += '<div class="card" style="margin-bottom: 20px;"><h3 style="margin-bottom: 15px; font-size: 1.15rem;">Nuclei Findings</h3>';
+            sevOrder.forEach(function(sev) {
+                if (!bySev[sev] || bySev[sev].length === 0) return;
+                var sc = sevColors[sev] || sevColors.info;
+                html += '<div style="border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 12px; padding: 0; background: rgba(255,255,255,0.02);">';
+                html += '<div onclick="toggleBlock(\'vuln-sev-' + sev + '\')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 14px;">';
+                html += '<div style="display: flex; align-items: center; gap: 12px;">';
+                html += '<span class="badge" style="background:' + sc.bg + ';color:' + sc.fg + ';padding:3px 10px;font-size:0.8rem;text-transform:capitalize">' + sev + '</span>';
+                html += '<span style="color: var(--color-muted); font-size: 0.95rem;">' + bySev[sev].length + ' findings</span></div>';
+                html += '<button style="background:none; border:none; cursor:pointer; color: var(--color-primary);">&#9660;</button></div>';
+                html += '<div id="vuln-sev-' + sev + '" style="display: none;">';
+                html += '<table class="table" style="width: 100%;"><thead><tr><th>Template</th><th>Name</th><th>Matcher</th><th>Description</th></tr></thead><tbody>';
+                bySev[sev].forEach(function(v) {
+                    html += '<tr style="transition: background 0.2s;" onmouseover="this.style.background=\'rgba(255,255,255,0.04)\'" onmouseout="this.style.background=\'transparent\'">';
+                    html += '<td style="font-family: monospace; color: var(--color-primary);">' + esc(v.template_id) + '</td>';
+                    html += '<td>' + esc(v.name) + '</td>';
+                    html += '<td>' + esc(v.matcher_name) + '</td>';
+                    html += '<td style="color: var(--color-muted); max-width: 350px;">' + esc(v.description) + '</td></tr>';
+                });
+                html += '</tbody></table></div></div>';
+            });
+            html += '</div>';
+        }
+
+        // Group CVEs by product
+        if (cves.length > 0) {
+            var byProduct = {};
+            cves.forEach(function(c) {
+                var p = c.product || 'unknown';
+                if (!byProduct[p]) byProduct[p] = [];
+                byProduct[p].push(c);
+            });
+
+            html += '<div class="card"><div onclick="toggleBlock(\'cve-products-section\')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;">';
+            html += '<h3 style="margin: 0;">Miscellaneous CVEs for Products</h3>';
+            html += '<button style="background:none; border:none; cursor:pointer; color: var(--color-primary);">&#9660;</button></div>';
+            html += '<div id="cve-products-section" style="display: none; margin-top: 15px;">';
+
+            Object.keys(byProduct).sort().forEach(function(product) {
+                var productCves = byProduct[product];
+                html += '<div style="border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 12px; padding: 0; background: rgba(255,255,255,0.02);">';
+                html += '<div onclick="toggleBlock(\'cve-product-' + product + '\')" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 14px;">';
+                html += '<div style="display: flex; align-items: center; gap: 10px;"><h4 style="margin: 0; text-transform: capitalize;">' + esc(product) + '</h4>';
+                html += '<span class="badge" style="background: var(--bg-hover); color: white;">' + productCves.length + ' CVEs</span></div>';
+                html += '<button style="background:none; border:none; cursor:pointer; color: var(--color-primary);">&#9660;</button></div>';
+                html += '<div id="cve-product-' + product + '" style="display: none;">';
+                html += '<table class="table" style="width: 100%;"><thead><tr><th>CVE ID</th><th>Severity</th><th>CVSS</th><th>EPSS</th><th>KEV</th><th>PoC</th><th>Template</th></tr></thead><tbody>';
+                productCves.forEach(function(c) {
+                    var sc = {critical:{bg:'#7f1d1d',fg:'#fecaca'},high:{bg:'#991b1b',fg:'#fecaca'},medium:{bg:'#9a3412',fg:'#fed7aa'},low:{bg:'#166534',fg:'#bbf7d0'}}[c.severity] || {bg:'#1e40af',fg:'#bfdbfe'};
+                    html += '<tr style="transition: background 0.2s;" onmouseover="this.style.background=\'rgba(255,255,255,0.04)\'" onmouseout="this.style.background=\'transparent\'">';
+                    html += '<td><a href="https://nvd.nist.gov/vuln/detail/' + esc(c.cve_id) + '" target="_blank" style="color: var(--color-primary);">' + esc(c.cve_id) + '</a></td>';
+                    html += '<td><span class="badge" style="background:' + sc.bg + ';color:' + sc.fg + '">' + esc(c.severity) + '</span></td>';
+                    html += '<td style="font-family: monospace;">' + (c.cvss_score || 0).toFixed(1) + '</td>';
+                    html += '<td style="font-family: monospace;">' + (c.epss_score || 0).toFixed(4) + '</td>';
+                    html += '<td>' + (c.is_kev ? '<span style="color:#ef4444;font-weight:bold">&#10003;</span>' : '<span style="color:var(--color-muted)">&#10007;</span>') + '</td>';
+                    html += '<td>' + (c.has_poc ? '<span style="color:#f59e0b;font-weight:bold">&#10003;</span>' : '<span style="color:var(--color-muted)">&#10007;</span>') + '</td>';
+                    html += '<td>' + (c.has_template ? '<span style="color:var(--color-secondary);font-weight:bold">&#10003;</span>' : '<span style="color:var(--color-muted)">&#10007;</span>') + '</td>';
+                    html += '</tr>';
+                });
+                html += '</tbody></table></div></div>';
+            });
+            html += '</div></div>';
+        }
+
+        container.innerHTML = html;
+    }
+
+    function renderLogs(container, data) {
+        if (!data || data.length === 0) {
+            container.innerHTML = '<div class="card"><p class="text-muted">No raw logs available.</p></div>';
+            return;
+        }
+        var html = '<div class="card">';
+        data.forEach(function(log) {
+            html += '<div style="margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">';
+            html += '<div style="display: flex; justify-content: space-between; margin-bottom: 5px;">';
+            html += '<span style="font-weight: bold; color: var(--color-primary);">' + esc(log.tool_name) + '</span>';
+            html += '<span style="color: var(--color-muted); font-size: 0.8em;">' + formatDate(log.created_at) + '</span>';
+            html += '</div>';
+            html += '<pre style="background: black; padding: 10px; border-radius: 4px; overflow-x: auto; max-height: 200px;">' + esc(log.output) + '</pre>';
+            html += '</div>';
+        });
+        html += '</div>';
+        container.innerHTML = html;
     }
 
     document.addEventListener("DOMContentLoaded", function () {
-        const savedTab = sessionStorage.getItem('activeTargetTab-{{.Target.ID}}');
+        const savedTab = sessionStorage.getItem('activeTargetTab-' + targetId);
         if (savedTab && document.getElementById(savedTab)) {
             showTab(null, savedTab);
         }
@@ -708,38 +625,6 @@
     function closeImage() {
         var modal = document.getElementById("imgModal");
         modal.style.display = "none";
-    }
-
-    function copyAllPaths(dataId, btn) {
-        var rawEl = document.getElementById(dataId);
-        if (!rawEl) return;
-        var rawContent = rawEl.textContent;
-        var paths = [];
-        try {
-            paths = JSON.parse(rawContent);
-        } catch (e) {
-            paths = rawContent;
-        }
-        if (typeof paths === 'string') {
-            var trimmed = paths.trim();
-            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-                try { paths = JSON.parse(trimmed); } catch (e) { paths = trimmed.split(/\r?\n/); }
-            } else {
-                paths = trimmed.split(/\r?\n/);
-            }
-        }
-        if (Array.isArray(paths)) {
-            paths = paths.filter(function (p) { return p && typeof p === 'string' && p.trim() !== ''; });
-        } else {
-            paths = [];
-        }
-        if (paths.length === 0) return;
-        navigator.clipboard.writeText(paths.join('\n')).then(function () {
-            var orig = btn.textContent;
-            btn.textContent = 'Copied!';
-            btn.style.color = '#10b981';
-            setTimeout(function () { btn.textContent = orig; btn.style.color = 'var(--color-muted)'; }, 1500);
-        });
     }
 </script>
 {{end}}

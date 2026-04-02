@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 type Client struct {
@@ -25,7 +26,8 @@ func (c *Client) SendNotification(message string) error {
 	}
 
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", c.Token)
-	resp, err := http.PostForm(apiURL, url.Values{
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.PostForm(apiURL, url.Values{
 		"chat_id":    {c.ChatID},
 		"text":       {message},
 		"parse_mode": {"Markdown"},

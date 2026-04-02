@@ -18,37 +18,14 @@
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
         <h2 style="margin: 0;"><a href="/asset/{{.ID}}"
                 style="color: var(--color-text); text-decoration: none;">{{.Name}}</a></h2>
-        <span class="badge badge-id">ID: {{.ID}}</span>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <span class="badge" style="background: var(--bg-hover); color: white;">{{index $.CountMap .ID}} targets</span>
+            <span class="badge badge-id">ID: {{.ID}}</span>
+        </div>
     </div>
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Type</th>
-                <th>Last Updated</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {{range .Targets}}
-            <tr>
-                <td><a href="/target/{{.ID}}" style="color: var(--color-primary); text-decoration: none;">{{.Value}}</a>
-                </td>
-                <td>{{.Type}}</td>
-                <td>{{if .IsCloudflare}}<span class="badge badge-cf">Cloudflare</span>{{else}}<span
-                        style="color: var(--color-muted);">Direct</span>{{end}}</td>
-                <td>{{.UpdatedAt.Format "Jan 02, 2006"}}</td>
-            </tr>
-            {{else}}
-            <tr>
-                <td colspan="4" style="text-align: center; color: var(--color-muted);">No targets in this asset group.
-                </td>
-            </tr>
-            {{end}}
-        </tbody>
-    </table>
+    <div style="color: var(--color-muted); font-size: 0.9rem;">
+        <a href="/asset/{{.ID}}" class="btn btn-primary" style="padding: 5px 15px; font-size: 0.85rem;">View Targets &rarr;</a>
+    </div>
 </div>
 {{else}}
 <div class="card" style="text-align: center; padding: 40px;">

@@ -108,6 +108,23 @@ const dnsCacheTTL = 5 * time.Minute
 // dnsCache stores DNS resolution results with TTL to avoid redundant lookups
 var dnsCache sync.Map
 
+func init() {
+	// Periodic cleanup of expired DNS cache entries to prevent memory leak
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			dnsCache.Range(func(key, value any) bool {
+				entry := value.(cachedDNSEntry)
+				if time.Since(entry.cachedAt) > dnsCacheTTL {
+					dnsCache.Delete(key)
+				}
+				return true
+			})
+		}
+	}()
+}
+
 // isLocalhost returns true if the IP is a loopback or unspecified address
 func isLocalhost(ip string) bool {
 	parsed := net.ParseIP(ip)

@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+// maxResponseBody caps how much data we read from upstream HTTP responses (10MB).
+const maxResponseBody = 10 * 1024 * 1024
+
+// readLimitedBody reads up to maxResponseBody bytes from r, preventing OOM from
+// unexpectedly large responses from the OpenCode server.
+func readLimitedBody(r io.Reader) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(r, maxResponseBody))
+}
+
 // OverlordURL is the base URL of the OpenCode serve API.
 var OverlordURL = "http://overlord:3000"
 
@@ -186,7 +195,7 @@ func GetLiveProviders() (*ProviderResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := readLimitedBody(resp.Body)
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
@@ -218,7 +227,7 @@ func GetLiveAgents() ([]LiveAgent, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := readLimitedBody(resp.Body)
 	var agents []LiveAgent
 	if err := json.Unmarshal(body, &agents); err != nil {
 		return nil, fmt.Errorf("invalid agent response: %w", err)
@@ -335,7 +344,7 @@ func GetSessions() ([]Session, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := readLimitedBody(resp.Body)
 	var sessions []Session
 	if err := json.Unmarshal(body, &sessions); err != nil {
 		return nil, fmt.Errorf("invalid response: %s", string(body))
@@ -352,7 +361,7 @@ func GetSessionMessages(sessionID string) ([]map[string]interface{}, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := readLimitedBody(resp.Body)
 	var messages []map[string]interface{}
 	json.Unmarshal(body, &messages)
 	return messages, nil
@@ -369,7 +378,7 @@ func CreateSession(title string) (*Session, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := readLimitedBody(resp.Body)
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
@@ -413,7 +422,7 @@ func SendPromptAsync(sessionID, message, model string) error {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := readLimitedBody(resp.Body)
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
@@ -498,7 +507,7 @@ func SetAuth(providerID, apiKey string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := readLimitedBody(resp.Body)
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
