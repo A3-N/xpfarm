@@ -83,7 +83,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
 RUN pip3 install --upgrade pip setuptools wheel
 
 # Install Python packages for RE, Exploitation, and APK analysis
-RUN pip3 install --no-cache-dir r2pipe capstone unicorn frida-tools frida-mcp angr pwntools ropper pycryptodome flare-floss triton-library
+RUN pip3 install --no-cache-dir r2pipe capstone unicorn frida-tools frida-mcp angr pwntools ropper pycryptodome flare-floss
+RUN pip3 install --no-cache-dir triton-library || echo "triton-library installation skipped (unsupported architecture)"
 RUN pip3 install --no-cache-dir semgrep || echo "semgrep installation skipped (optional)"
 
 # Create working directory for binaries
